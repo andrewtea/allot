@@ -8,6 +8,7 @@
     "build": "vite build web && cp node_modules/@fontsource-variable/manrope/LICENSE web/dist/assets/manrope-license.txt && cp node_modules/@fontsource-variable/dm-sans/LICENSE web/dist/assets/dm-sans-license.txt",
     "dev:local": "node scripts/local-study.ts",
     "actors:dev": "terse actor dev",
+    "actors:deploy": "node scripts/deploy-actors.ts",
     "actors:generate": "terse actor generate --out-dir server/generated --non-interactive",
     "test": "node --experimental-strip-types --test tests/*.test.ts"
   },

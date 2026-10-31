@@ -1,6 +1,6 @@
 # MVP user specification: federated imaging study
 
-Status: create/run/results browser phase implemented and locally validated with real voxel analysis, SQLite runners, and authenticated local Terse. The local adapter uses in-memory messaging, not cloud end-to-end execution. A separate single-site Freestyle/hosted Relay crash-recovery gate passed earlier. Completed checks and remaining integration gates are recorded in the technical specification.
+Status: create/run/results browser phase implemented. A supervised one-site run through the deployed Render browser, managed Terse, hosted Relay, and the existing Freestyle Site B VM passed on 2026-10-31: two real MRI results, one pass, one synthetic blank-slab finding, and two persisted previews totaling 183,026 bytes. Three-site cloud execution and unattended coordination are not established. Local validation remains separate and uses in-memory messaging. Completed checks and remaining integration gates are recorded in the technical specification.
 
 The hosted browser can operate in authentication-only mode before cloud agents are connected. After sign-in it shows **Cloud setup pending**, with study creation, analysis, and evidence unavailable; it does not display local results as cloud execution.
 

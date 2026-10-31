@@ -8,12 +8,31 @@ runners, Terse study actors, coordinator recovery, and an authenticated browser
 create/run/results/retry screen**. The runner has passed a
 live single-site Freestyle/hosted Relay gate. Actor/coordinator tests run against
 real local Terse. The browser can be hosted on free Render in authentication-only
-mode while cloud study services are unconfigured. There is no human resolution, final report,
+mode while cloud study services are unconfigured. A supervised **one-site cloud
+browser run** has now passed with managed Terse, hosted Relay, and real MRI
+analysis in the existing Freestyle Site B VM. There is no human resolution, final report,
 or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
 and [technical spec](MVP_TECHNICAL_SPEC.md).
 
 The browser follows the [frontend design direction](docs/frontend-design.md):
 flat site rows, a split evidence pane, and self-hosted OFL Manrope / DM Sans.
+
+## Supervised cloud demo
+
+The existing [live study](https://allot-1dzm.onrender.com/studies/e3de79e1-2fb8-4232-830e-9799cdc8c815)
+requires the privately supplied researcher credential. On 2026-10-31, browser
+create → run executed Site B's actual Python/SQLite runner over hosted Relay:
+sub-04 passed; synthetic sub-03 flagged internal blank slices 100–102 and the
+additional heuristic interval 248–249. Managed Terse persisted both hash-verified
+PNG previews (183,026 bytes). The site ledger recorded one completed execution
+and three sent outbox events. No raw volumes were retrieved centrally.
+
+This is **one simulated site, not the intended three-site deployment**. The
+existing VM retains its bounded TTL/runtime policies. Free Render can sleep;
+this demonstrates supervised execution, not unattended coordination. The study
+holds the pool through review, so use its saved URL to inspect results; another
+study cannot run until reservation release is implemented. Investigation,
+approvals, collaboration, and reports are still unavailable.
 
 ## Local development
 
@@ -257,7 +276,16 @@ backend calls retrieve state. The browser routes above validate researcher
 sessions before accessing the generated actor client.
 
 Run `npm run actors:dev` for local actors and `npm run actors:generate` after
-changing their contract. For local tooling, unset injected managed
+changing their contract. For an authorized managed deployment, use
+`npm run actors:deploy -- <existing-project-id>` with server-only `TERSE_API_KEY`.
+Add `--check` to inspect the source allowlist without deploying. This command
+stages only actor source and package/typecheck metadata, then deletes the staging
+directory. Do not run bare `terse deploy` from this working tree: CLI 0.14.9 does
+not honor `.gitignore` and could upload private `.local` configuration or data.
+Deployment replaces the project's published actor set; the disposable Counter
+quickstart was replaced with explicit approval for this demo.
+
+For local tooling, unset injected managed
 `TERSE_API_KEY` / `TERSE_ACTOR_URL` so those credentials are not used locally.
 Generated clients are checked in; do not edit them. `npm test` starts disposable,
 authenticated local Terse runtimes and verifies persisted evidence after a full
@@ -266,8 +294,9 @@ This requires Bun (1.4.2+) as well as Node and the Python test environment.
 
 This is the create/run/results foundation, not the complete study workflow.
 Investigation, human decisions, finalization/releasing the active reservation
-still need implementation. Managed Terse deployment, actor capacity,
-and managed authentication/persistence remain explicit deployment gates.
+still need implementation. Managed authentication and persistence have passed
+for the one-site run above; six-scan managed evidence capacity and full managed
+restart/recovery remain unverified.
 
 ## Coordinator
 

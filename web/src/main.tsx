@@ -37,7 +37,7 @@ async function api<T>(path: string, body?: object, method = body ? 'POST' : 'GET
 const siteName = (id: string) => `Site ${id.slice(-1).toUpperCase()}`;
 const date = (value: string | number) => new Date(value).toLocaleString();
 const labels: Record<string, string> = { draft: 'Draft', running: 'Running', blocked: 'Blocked', needs_review: 'Needs review',
-  ready_to_finalize: 'Analysis complete', analyzing: 'Analyzing', complete: 'Checks passed', queued: 'Not started', error: 'Error' };
+  ready_to_finalize: 'Ready to finalize', finalized: 'Finalized report', investigating: 'Investigating', analyzing: 'Analyzing', complete: 'Complete', queued: 'Not started', error: 'Error' };
 function Status({ value }: { value: string }) { return <span className={`status ${value}`}>{labels[value] ?? value}</span>; }
 
 function App() {
@@ -148,18 +148,22 @@ function App() {
           }} />
           <h2>Preconfigured sites</h2><ul className="setup-sites">{session.sites.map(s => <li key={s.id}><span>{siteName(s.id)}</span><span>{s.selected} selected scans</span></li>)}</ul>
           <p className="muted">Workflow: MRI integrity review v1. All sites are required. Raw MRI volumes and local file paths are not shared. Sites B and C contain labeled synthetic corruptions.</p>
-          <p className="notice">This phase stops at results. Investigation, human decisions, viewer sharing, and final reports are not available. Sites are released after all analysis and previews finish; previous results remain available.</p>
+          <p className="notice">Flagged scans receive bounded agent investigation. Only your approval can replace or exclude a subject. Finalized reports retain original evidence. Viewer sharing is not available yet.</p>
           <Reopen /></section>
         : !study ? <section className="start"><h1>Opening study</h1><p>Fetching the persisted study snapshot.</p><button onClick={refresh}>Try again</button></section>
         : <>
           <section className="study-header"><div className="title-line"><h1>{study.title}</h1><Status value={study.lifecycle} /></div>
             <p className="muted">MRI integrity review v1 · {study.sites.length} simulated sites</p>
-            <p className="counts"><span><strong>{study.sites.reduce((n, s) => n + s.selected.length, 0)}</strong> selected</span><span><strong>{all.filter(r => r.checks_passed).length}</strong> checks passed</span><span><strong>{all.filter(r => !r.checks_passed).length}</strong> flagged</span><span><strong>{all.filter(r => r.evidence.status === 'ready').length}</strong> previews</span></p>
+            <p className="counts"><span><strong>{study.inclusion.length}</strong> selected</span><span><strong>{study.inclusion.filter(i => i.status === 'included' || i.status === 'replaced').length}</strong> included{study.lifecycle !== 'finalized' && ' (provisional)'}</span><span><strong>{study.inclusion.filter(i => i.status === 'excluded').length}</strong> excluded</span><span><strong>{study.inclusion.filter(i => i.status === 'replaced').length}</strong> replacement</span><span><strong>{study.inclusion.filter(i => i.status === 'unresolved').length}</strong> unresolved</span></p>
             <div className="toolbar"><span className={stale ? 'connection stale' : 'connection'} role="status">{stale ? 'Disconnected · showing last known state' : 'Connected · refreshes every 2 seconds'}{updated && ` · ${date(updated)}`}</span>
               {study.lifecycle === 'draft' && <><button disabled={disabled} onClick={() => command('start')}>{busy ? 'Submitting…' : 'Run analysis'}</button><button className="secondary" disabled={disabled} onClick={() => setEditing(!editing)}>Edit title</button></>}
+              {study.lifecycle === 'needs_review' && all.some(r => !r.checks_passed && !study.investigations[`${r.site_id}:${r.acquisition_id}`]) && <button disabled={disabled} onClick={() => command('investigate')}>Investigate findings</button>}
+              {Object.values(study.investigations).some(j => j.state === 'error') && <button disabled={disabled} onClick={() => command('investigate')}>Retry investigation</button>}
+              {study.lifecycle !== 'draft' && study.lifecycle !== 'finalized' && <button disabled={disabled || study.lifecycle !== 'ready_to_finalize' || !study.inclusion.some(i => i.status === 'included' || i.status === 'replaced')} onClick={() => command('finalize')}>Finalize report</button>}
+              {study.lifecycle === 'finalized' && <><a href={`/api/studies/${study.id}/export.md`}>Download Markdown</a><a href={`/api/studies/${study.id}/export.json`}>Download JSON</a></>}
             </div>
             {editing && <TitleForm initial={study.title} label="Study title" submit="Save title" disabled={disabled} onSubmit={title => command('title', { title })} />}
-            <p className="phase-note">Provisional results only. Investigation, approvals, and final reports are not implemented. Passing checks does not establish clinical or scientific suitability.</p>
+            <p className="phase-note">{study.lifecycle === 'finalized' ? `Frozen ${date(study.finalized_at!)}. Original scans, proposals, human decisions and previews are retained.` : 'Agent suggestions do not change inclusion. Resolve every finding before finalizing; leave unresolved by making no decision.'} Passing checks does not establish clinical or scientific suitability.</p>
           </section>
           <div className={`workspace ${detail ? 'show-detail' : ''}`}>
             <aside className="sites"><h2>Sites</h2><p className="muted small">Select a site, then an acquisition.</p>
@@ -176,14 +180,16 @@ function App() {
               <p className="muted small">Closing this tab does not stop the worker. Save this study URL to reopen it.</p>
             </aside>
             <section ref={detailPane} tabIndex={-1} className="scan-detail" aria-label="Acquisition detail"><button className="back secondary" onClick={() => setDetail(false)}>← Back to sites</button>
-              {scan ? <Scan key={`${site!.id}:${scan.acquisition_id}`} study={study} result={scan} /> : <><p className="eyebrow">{site && siteName(site.id)}</p><h2>{study.lifecycle === 'draft' ? 'Ready when you are' : site?.state === 'error' ? 'Analysis interrupted' : 'Waiting for measurements'}</h2>
+              {scan ? <><Review key={`review:${site!.id}:${scan.acquisition_id}`} study={study} result={scan} disabled={disabled} decide={(extra) => command('decide', extra)} /><Scan key={`${site!.id}:${scan.acquisition_id}`} study={study} result={scan} /></> : <><p className="eyebrow">{site && siteName(site.id)}</p><h2>{study.lifecycle === 'draft' ? 'Ready when you are' : site?.state === 'error' ? 'Analysis interrupted' : 'Waiting for measurements'}</h2>
                 <p>{study.lifecycle === 'draft' ? 'Run analysis to measure the actual voxel data at each site. Results and derived montages will appear here.' : 'No results have been accepted for this site yet. Other sites can continue independently.'}</p>
                 <dl><dt>Checks</dt><dd>Loadability, finite voxels, nonempty signal, internal blank slices</dd><dt>Shared evidence</dt><dd>Bounded PNG montages, descriptive measurements, and provenance</dd><dt>Not measured</dt><dd>Diagnosis, motion scores, brain volume, or clinical quality</dd></dl></>}
             </section>
           </div>
-          <section className="activity"><h2>Measurement activity</h2><p className="muted small">Tool timestamps, not agent explanations or human decisions.</p><ol>
+          <section className="activity"><h2>Study activity</h2><p className="muted small">Measurements, agent suggestions, and human decisions are separate records.</p><ol>
             <li><time>{date(study.created_at)}</time><span>Study created · fixed workflow and dataset snapshot</span></li>
             {[...all].sort((a, b) => a.provenance.timestamp.localeCompare(b.provenance.timestamp)).map(r => <li key={`${r.site_id}:${r.acquisition_id}`}><time>{date(r.provenance.timestamp)}</time><span>{siteName(r.site_id)} · {r.acquisition_id} · {r.checks_passed ? 'Checks passed' : `${r.findings.length} failed check(s)`}</span></li>)}
+            {Object.entries(study.investigations).map(([key, j]) => <li key={key}><span>Agent · {key} · {j.state}{j.proposal && ` · suggests ${j.proposal.action} · ${j.proposal.tool_calls} tool calls · ${j.proposal.model}`}</span></li>)}
+            {Object.entries(study.decisions).map(([key, d]) => <li key={key}><time>{date(d.at)}</time><span>Human · {key} · {d.action}: {d.reason}</span></li>)}
           </ol></section>
         </>}
     </main><footer>Simulated sites · Public research data · Not for clinical use</footer>
@@ -205,6 +211,27 @@ function Reopen() {
   } catch { setError('Enter a study URL from this workspace.'); } }}><h2>Reopen a study</h2><label htmlFor="study-url">Known study URL</label><input id="study-url" value={url} onChange={e => setUrl(e.target.value)} required placeholder="Paste a study URL" /><button className="secondary">Open study</button>{error && <p role="alert">{error}</p>}</form>;
 }
 function Row({ label, children }: { label: string; children: ReactNode }) { return <><dt>{label}</dt><dd>{children}</dd></>; }
+function Review({ study, result, disabled, decide }: { study: StudyView; result: ScanResult; disabled: boolean; decide: (extra: object) => void }) {
+  const key = `${result.site_id}:${result.acquisition_id}`;
+  const job = study.investigations[key];
+  const proposal = job?.proposal;
+  const decision = study.decisions[key];
+  const [reason, setReason] = useState('');
+  useEffect(() => { setReason(proposal?.reason ?? ''); }, [proposal?.reason]);
+  if (result.checks_passed) return null;
+  return <section className="review" aria-label="Finding resolution"><h2>Finding resolution</h2>
+    {decision ? <p className="notice">Human decision: <strong>{decision.action === 'replace' ? `Replaced with ${decision.candidate_id}` : 'Subject excluded'}</strong> · {decision.reason}</p>
+      : !proposal ? <p role="status">{job?.state === 'error' ? 'Investigation failed; no proposal was invented. Use Retry investigation.' : job?.state === 'investigating' ? 'Investigating locally · bounded to 10 tool calls and 2 minutes. No human decision yet.' : 'Awaiting local investigation. No replacement or exclusion decision yet.'}</p>
+      : <><p className="eyebrow">Agent suggestion · Not a human decision · {proposal.model}</p><p>{proposal.reason}</p>
+        </>}
+    {proposal && <details><summary>Tool-backed investigation ({proposal.tool_calls} calls)</summary><ol>{proposal.trace.map((t, i) => <li key={i}><code>{t.tool}({Object.values(t.arguments).join(', ')})</code><pre>{JSON.stringify(t.output, null, 2)}</pre></li>)}</ol></details>}
+    {proposal?.candidate && <div className="comparison"><h3>Original / {decision?.action === 'replace' ? 'approved' : 'proposed'} retest</h3><div className="comparison-images">{[result, proposal.candidate].map(r => <figure key={r.acquisition_id}><figcaption>{r.acquisition_id} · {r.checks_passed ? 'Checks passed' : 'Flagged original'}</figcaption>{r.evidence.status === 'ready' && <img src={`/api/studies/${study.id}/evidence/${r.evidence.artifact_id}`} alt={`${r.acquisition_id} comparison montage`} />}</figure>)}</div><details><summary>Retest measurements and provenance</summary><Scan study={study} result={proposal.candidate} /></details></div>}
+    {!decision && proposal && <><label htmlFor="decision-reason">Human decision reason (required)</label><textarea id="decision-reason" maxLength={2000} value={reason} onChange={e => setReason(e.target.value)} />
+        <div className="toolbar">{proposal.candidate && <button disabled={disabled || !reason.trim()} onClick={() => decide({ findingId: key, action: 'replace', reason, candidateId: proposal.candidate!.acquisition_id })}>Approve replacement</button>}
+          <button className="secondary" disabled={disabled || !reason.trim()} onClick={() => decide({ findingId: key, action: 'exclude', reason, candidateId: null })}>Exclude subject</button><span className="small muted">Leave unresolved: make no decision.</span></div></>}
+    <h3>Retained original evidence</h3>
+  </section>;
+}
 function Scan({ study, result: r }: { study: StudyView; result: ScanResult }) {
   const [imageError, setImageError] = useState(false);
   const [reload, setReload] = useState(0);
@@ -214,7 +241,7 @@ function Scan({ study, result: r }: { study: StudyView; result: ScanResult }) {
   return <>
     <div className="title-line"><p className="eyebrow">{siteName(r.site_id)} / {r.acquisition_id}</p>{transformation && <span className="tag">Synthetic corruption</span>}</div>
     <h2 className="finding-title">{r.checks_passed ? 'Checks passed' : r.findings.some(f => f.code === 'INTERNAL_BLANK_SLAB') ? 'Internal blank slices' : r.findings.some(f => f.code === 'DEGENERATE_SIGNAL') ? 'No usable signal' : 'Integrity checks flagged'}</h2>
-    <p>{r.checks_passed ? 'This acquisition passed the fixed integrity checks. Inclusion is provisional.' : 'This acquisition needs review and is not provisionally included. No replacement or exclusion decision has been made.'}</p>
+    <p>{r.checks_passed ? 'This acquisition passed the fixed integrity checks.' : 'This original failed integrity checks and is not included. Its findings and evidence are retained regardless of the human resolution.'}</p>
     {r.findings.length > 0 && <ul className="findings">{r.findings.map(f => <li key={f.code}><strong>{f.code.replaceAll('_', ' ')}</strong>{f.intervals_z && ` · Canonical axial slices ${f.intervals_z.map(([a, b]) => `${a}–${b}`).join(', ')}`}{f.count !== undefined && ` · ${f.count} voxels`}</li>)}</ul>}
     {transformation && <p className="muted small">Synthetic fixture: {transformation.type === 'zero_all_voxels' ? 'all voxel intensities were set to zero.' : `canonical axial slices ${transformation.start}–${transformation.end_inclusive} were set to zero. All detected intervals remain visible, including additional heuristic flags.`}</p>}
     <figure>{evidence.status === 'ready' ? imageError ? <div className="evidence-message"><p>Preview could not be loaded. Accepted evidence remains stored in this study.</p><button className="secondary" onClick={() => { setImageError(false); setReload(n => n + 1); }}>Reload preview</button></div>

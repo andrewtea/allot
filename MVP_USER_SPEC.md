@@ -20,7 +20,7 @@ The valuable interaction is the follow-up: a site agent finds a problem, looks f
 
 ## 2. Decisions and boundaries
 
-- One always-running paid Render Web Service hosts the web UI, backend, and coordinator together. The free tier is unsuitable because idle spin-down can interrupt coordination. No separate Vercel deployment or worker service is required; Render hosting remains to be validated.
+- Start with one free Render Web Service for the minimal server and hosting checks. The full web UI, backend, and coordinator will share that service. Free-tier idle spin-down can interrupt coordination, so unattended workflows require an approved paid upgrade or a revised execution design. No separate Vercel deployment or worker service is required; the full Render workflow remains to be validated.
 - Managed Terse Durable Actors owns study state and live coordination. No self-hosting.
 - Freestyle runs three isolated site environments, their agents, and Python analysis tools.
 - Agent Relay carries coordinator/site requests and responses.

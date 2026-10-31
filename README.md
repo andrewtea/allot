@@ -5,7 +5,8 @@ data only; not for clinical use.
 
 The first implementation is the **site-local analysis pipeline, reproducible MRI
 fixture, and durable Relay runner**. The runner has passed a live single-site
-Freestyle/hosted Relay gate, including crash recovery. There is no application UI,
+Freestyle/hosted Relay gate, including crash recovery. A minimal HTTP server is
+ready for a free Render bootstrap deployment. There is no application UI,
 actor workflow, or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
 and [technical spec](MVP_TECHNICAL_SPEC.md).
 
@@ -24,6 +25,31 @@ npm ci
 npm run check
 npm test
 ```
+
+## HTTP bootstrap and free Render
+
+`npm start` runs the HTTP server on `0.0.0.0` and `PORT` (default 3000). `GET /`
+returns an explicit bootstrap status, and `GET /healthz` returns
+`{"status":"ok"}`. Both support HEAD. Unknown routes return 404; writes to these
+read-only endpoints return 405. SIGTERM/SIGINT stop accepting connections and
+allow up to ten seconds to finish requests. The health check proves only HTTP
+liveness, not readiness of Terse, Relay, Freestyle, or a study workflow.
+
+`render.yaml` defines one **free** Node web service with Node 24.22.1 pinned in
+`.node-version`, build command `npm ci --include=dev && npm run check`, start
+command `npm start`, and health check `/healthz`. Native Node TypeScript support
+runs the server without a compilation artifact. Auto-deploy is disabled so a
+Git push alone does not deploy future changes. The bootstrap needs no provider
+credentials: do not attach the existing `allot-demo` secret group yet.
+
+Free Render sleeps after 15 minutes without inbound traffic. This is suitable
+for initial hosting checks and supervised development, **not** the uninterrupted
+coordinator contract. Relay polling is outbound and does not prevent sleep;
+browser subscriptions to Terse do not reach Render. Before unattended execution,
+upgrade compute with approval or revise the coordinator design. No authoritative
+study state or evidence may depend on Render's ephemeral filesystem.
+
+## Prepare the public fixture
 
 Prepare each site's fixture independently (about 64.9 MB downloaded in total):
 

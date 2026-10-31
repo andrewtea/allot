@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node server/main.ts",
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts"
   },

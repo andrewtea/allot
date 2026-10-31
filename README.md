@@ -4,16 +4,16 @@ Image-backed integrity review across simulated research sites. Public research
 data only; not for clinical use.
 
 Implemented: **site-local analysis, reproducible MRI fixtures, durable Relay
-runners, Terse study actors, and coordinator recovery**. The runner has passed a
+runners, Terse study actors, coordinator recovery, and an authenticated browser
+create/run/results/retry screen**. The runner has passed a
 live single-site Freestyle/hosted Relay gate. Actor/coordinator tests run against
 real local Terse. The minimal HTTP bootstrap is live on free Render; the new
-study backend is not deployed. There is no application UI, researcher sign-in,
-human resolution, or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
+study application is not deployed. There is no human resolution, final report,
+or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
 and [technical spec](MVP_TECHNICAL_SPEC.md).
 
-The [frontend design direction](docs/frontend-design.md) records the preferred
-visual reference, layout rules, proposed tokens, and researched font options;
-it is not an implemented UI.
+The browser follows the [frontend design direction](docs/frontend-design.md):
+flat site rows, a split evidence pane, and self-hosted OFL Manrope / DM Sans.
 
 ## Local development
 
@@ -28,12 +28,85 @@ uv run ruff check analysis tests
 uv run ruff format --check analysis tests
 npm ci
 npm run check
+npm run build
 npm test
 ```
 
+## Browser study screen
+
+Prepare all three public fixtures below, then run `npm run build` and
+`npm run dev:local`. This starts authenticated **local Terse**, the coordinator,
+three real Python/SQLite runners, and HTTP on `PORT` (default 3000). It uses
+**in-memory messaging, not hosted Relay or Freestyle**; no cloud credentials
+are used and no resources are provisioned. Bun 1.4.2+ is required. Private
+demo access/signing material is generated once in `.local/browser/access.json`
+(mode 0600); use its `credential` value in the sign-in form, never paste it in
+chat or commit it. `APP_ORIGIN` sets the exact public origin for CSRF protection
+and Secure cookies; it defaults to the local HTTP address only for development.
+
+In an Amp orb, use a supervised portal:
+
+```bash
+amp orb service start allot --command 'APP_ORIGIN="$PUBLIC_URL" npm run dev:local' --port 3000 --portal --title 'Allot study workspace'
+```
+
+Open the printed portal, sign in, create a study, optionally edit its Draft
+title, and run analysis. Select a site/acquisition to inspect measurements,
+all findings, actual montages, and provenance. The browser refreshes authenticated
+snapshots every two seconds and marks failures disconnected with the last
+successful timestamp. Reloading the study URL restores persisted state. A
+network-failed command can be retried with its original ID. Site errors offer
+**Retry site**; completed sites remain intact. **Reload preview** only retries
+HTTP retrieval of already-persisted evidence, not image analysis.
+
+This phase intentionally stops at results. There are no LLM investigations,
+approvals, viewer links, finalization, or exports. A missing generated preview
+currently requires retrying its site's analysis; independent **Retry preview**
+and direct managed WebSocket subscriptions are deferred. This is not full U4/U6
+acceptance. The registry keeps the active study reserved through review, so a
+second study may be created but cannot run. No reset/release button is provided.
+For a separate **disposable local** validation pool, run
+`node scripts/local-study.ts <private-state-directory> <prepared-fixture-directory>`
+on another port. Do not delete an existing study's data to reuse the pool.
+
+Local actors and runner ledgers persist in the private state directory. The
+development adapter replays durable runner outboxes after restart because its
+messaging queues are volatile. This is not evidence of cloud delivery or
+cross-site isolation, and the orb is not a production host.
+
+For the managed backend, `BROWSER_CONFIG` names a private JSON file with
+`origin` (the exact HTTPS origin, without trailing slash), `credential`
+(at least 24 characters), `sessionSecret` (at least 32 characters), and `sites`.
+Generate random credential/signing values. Each site supplies `site_id`,
+`manifest_sha256`, and `selected` entries containing `subject_id`,
+`acquisition_id`, `input_sha256`, and `source_sha256`; no local paths. This
+snapshot must match the immutable site manifests. Also configure the coordinator
+as below, deploy the updated actors, and run `npm run build` before `npm start`.
+Browser configuration without a coordinator fails closed. Do not enable this on
+shared infrastructure without approval. No Render deployment was performed.
+
+HTTP routes are `POST/GET/DELETE /api/session`, `POST /api/studies`,
+`GET /api/studies/:id`, `POST /api/studies/:id/title`,
+`POST /api/studies/:id/start`, `POST /api/studies/:id/sites/:site/retry`, and
+`GET /api/studies/:id/evidence/:sha256`. Writes require the configured Origin and
+JSON; every study/evidence request requires a signed 12-hour HttpOnly session.
+Actor jobs, provider keys, and raw volumes are never returned to the browser.
+There is no viewer capability endpoint yet. Login throttling is process-local
+demo protection, not production account security.
+
+Browser validation on 2026-10-31 used real local actors/Python/SQLite and simulated
+messaging: six scans, four passes, two flagged, six hash-verified PNGs totaling
+383,305 bytes. A missing Site B fixture caused a real tool failure; restoring it
+and clicking Retry site recovered B without changing A/C results. Reload and
+process restart preserved all six results. Browser checks also cover invalid
+login, Draft editing, running, busy-pool rejection, image retrieval failure,
+disconnection/reconnection, and 390px list/detail layouts. No managed application
+end-to-end run, approval, or final report is claimed.
+
 ## HTTP bootstrap and free Render
 
-`npm start` runs the HTTP server on `0.0.0.0` and `PORT` (default 3000). `GET /`
+Without `BROWSER_CONFIG`, `npm start` runs the HTTP bootstrap on `0.0.0.0` and
+`PORT` (default 3000). `GET /`
 returns an explicit bootstrap status, and `GET /healthz` returns
 `{"status":"ok"}`. Both support HEAD. Unknown routes return 404; writes to these
 read-only endpoints return 405. SIGTERM/SIGINT stop accepting connections and
@@ -169,8 +242,8 @@ retries create new attempt IDs, retain valid results, and reject late responses.
 An early site-finished event cannot hide missing results. Missing previews block
 completion. A durable five-minute no-progress alarm makes failed sites retryable.
 Viewer sockets emit revisions only and reject client commands; authenticated
-backend calls retrieve state. Researcher sessions and public study routes are
-not implemented yet.
+backend calls retrieve state. The browser routes above validate researcher
+sessions before accessing the generated actor client.
 
 Run `npm run actors:dev` for local actors and `npm run actors:generate` after
 changing their contract. For local tooling, unset injected managed
@@ -181,8 +254,8 @@ runtime restart, reservations, retries, replay, and read-only WebSocket grants.
 This requires Bun (1.4.2+) as well as Node and the Python test environment.
 
 This is the create/run/results foundation, not the complete study workflow.
-Investigation, human decisions, finalization/releasing the active reservation,
-and the UI still need implementation. Managed Terse deployment, actor capacity,
+Investigation, human decisions, finalization/releasing the active reservation
+still need implementation. Managed Terse deployment, actor capacity,
 and managed authentication/persistence remain explicit deployment gates.
 
 ## Coordinator

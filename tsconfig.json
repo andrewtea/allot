@@ -5,9 +5,10 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "noEmit": true,
+    "jsx": "react-jsx",
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "study/**/*.ts", "server/**/*.ts", "site/**/*.ts", "scripts/**/*.ts", "tests/**/*.test.ts"]
+  "include": ["src/**/*.ts", "study/**/*.ts", "server/**/*.ts", "site/**/*.ts", "scripts/**/*.ts", "tests/**/*.test.ts", "web/**/*.tsx"]
 }

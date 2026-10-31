@@ -5,13 +5,19 @@
   "scripts": {
     "start": "node server/main.ts",
     "check": "tsc --noEmit",
+    "build": "vite build web && cp node_modules/@fontsource-variable/manrope/LICENSE web/dist/assets/manrope-license.txt && cp node_modules/@fontsource-variable/dm-sans/LICENSE web/dist/assets/dm-sans-license.txt",
+    "dev:local": "node scripts/local-study.ts",
     "actors:dev": "terse actor dev",
     "actors:generate": "terse actor generate --out-dir server/generated --non-interactive",
     "test": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
     "@agent-relay/sdk": "15.0.1",
+    "@fontsource-variable/dm-sans": "5.3.0",
+    "@fontsource-variable/manrope": "5.3.0",
     "freestyle": "0.2.21",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "terse-sdk": "0.14.9",
     "zod": "4.6.7"
   },
@@ -23,8 +29,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "terse-cli": "0.14.9",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vite": "8.3.5"
   },
   "engines": {
     "node": ">=22.18.0"

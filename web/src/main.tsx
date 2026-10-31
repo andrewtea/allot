@@ -4,7 +4,7 @@ import type { StudyView } from '../../server/studies.ts';
 import type { ScanResult } from '../../study/protocol.ts';
 import './style.css';
 
-type Session = { mode: 'local' | 'managed'; sites: { id: string; selected: number }[] };
+type Session = { mode: 'local' | 'managed' | 'unconfigured'; sites: { id: string; selected: number }[] };
 type Operation = { path: string; body: object };
 const studyId = /^\/studies\/([0-9a-f-]{36})$/.exec(location.pathname)?.[1];
 const messages: Record<string, string> = {
@@ -16,6 +16,7 @@ const messages: Record<string, string> = {
   COMMAND_CONFLICT: 'This command conflicts with an earlier request. Reload the study before continuing.',
   NOT_FOUND: 'This study or evidence was not found. Check the study URL.',
   SERVICE_UNAVAILABLE: 'The study service is unavailable. Your last known state is shown.',
+  CLOUD_NOT_CONFIGURED: 'Cloud study services are not connected. No analysis has been started.',
   INVALID_REQUEST: 'Check the title and try again.',
   ORIGIN_REJECTED: 'This address is not configured for writes. Ask the operator to configure the public app origin.',
   SITE_ANALYSIS_FAILED: 'The site could not complete its analysis. Restore the site or tool, then retry. Completed sites remain intact.',
@@ -76,7 +77,7 @@ function App() {
     setSession(null); if (!(e instanceof ApiError && e.status === 401)) setError('Cannot reach the application. Try signing in again.');
   }); }, []);
   useEffect(() => {
-    if (!session || !studyId) return;
+    if (!session || session.mode === 'unconfigured' || !studyId) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => { await refresh(); if (!stopped) timer = setTimeout(tick, 2000); };
@@ -121,7 +122,7 @@ function App() {
   const disabled = busy || !!pending || stale;
   return <>
     <header className="masthead"><a className="brand" href="/" aria-label="Allot home">allot</a><span>Research workspace</span>
-      {session && <nav><a href="/">New study</a><button className="text-button" onClick={signOut}>Sign out</button></nav>}</header>
+      {session && <nav>{session.mode !== 'unconfigured' && <a href="/">New study</a>}<button className="text-button" onClick={signOut}>Sign out</button></nav>}</header>
     <main>
       {session?.mode === 'local' && <p className="environment">Local development · Real Python / SQLite / Terse · In-memory messaging, not cloud end-to-end</p>}
       {error && <div className="notice error" role="alert">{error}</div>}
@@ -132,6 +133,13 @@ function App() {
           <form onSubmit={signIn}><label htmlFor="credential">Demo credential</label><input id="credential" type="password" autoComplete="current-password" required value={credential} onChange={e => setCredential(e.target.value)} />
             <button disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button></form>
           <p className="muted">Use the credential supplied privately by your operator. This is demo access, not production identity management.</p></section>
+        : session.mode === 'unconfigured' ? <section className="start"><p className="eyebrow">Deployment status</p><h1>Cloud setup pending</h1>
+          <p>The browser workspace is deployed and researcher sign-in is working. Cloud study services are not connected yet.</p>
+          <p className="notice">Creating studies, running analysis, and retrieving results are unavailable. No analysis is running here, and no local or simulated results are presented as cloud execution.</p>
+          <h2>Required before the first cloud study</h2><ul>
+            <li>Deploy the managed Terse study actors.</li><li>Connect the three Freestyle sites through authenticated Relay messaging.</li>
+            <li>Configure the immutable dataset snapshot and verify evidence retrieval.</li><li>Resolve always-running coordination: free Render can sleep when idle.</li>
+          </ul><p className="muted">Investigation, human approvals, and final reports remain a later phase.</p></section>
         : !studyId ? <section className="start"><p className="eyebrow">New study</p><h1>MRI integrity review</h1>
           <p>{session.sites.reduce((n, s) => n + s.selected, 0)} public T1-weighted acquisitions. One fixed workflow. Inspect what passed, what needs review, and the image evidence behind each result.</p>
           <TitleForm label="Study title" initial="MRI integrity review" submit="Create study" disabled={busy || !!pending} onSubmit={title => {

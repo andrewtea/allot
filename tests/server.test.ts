@@ -11,7 +11,7 @@ import { startLocalActors } from 'terse-sdk/dev';
 import { actors, createActorTransport } from '../server/generated/index.js';
 import { Coordinator } from '../server/coordinator.ts';
 import { sessionToken } from '../server/session.ts';
-import type { BrowserConfig, StudyView } from '../server/studies.ts';
+import { browserConfig, type BrowserConfig, type StudyView } from '../server/studies.ts';
 import type { Study } from '../study/state.ts';
 import type { SiteConnection } from '../server/coordinator.ts';
 
@@ -49,6 +49,51 @@ test('bootstrap HTTP contract exposes liveness, not application readiness', asyn
     }
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('auth-only deployment signs in securely but refuses every study operation without a coordinator', async () => {
+  const keys = ['BROWSER_CONFIG', 'APP_ORIGIN', 'DEMO_CREDENTIAL', 'SESSION_SECRET'] as const;
+  const previous = keys.map(key => process.env[key]);
+  let server: ReturnType<typeof createAppServer> | undefined;
+  try {
+    keys.forEach(key => delete process.env[key]);
+    assert.equal(browserConfig(), undefined);
+    process.env.APP_ORIGIN = 'https://allot.example';
+    assert.throws(browserConfig, { message: 'INVALID_BROWSER_CONFIG' });
+    process.env.DEMO_CREDENTIAL = 'test-only-long-demo-credential';
+    process.env.SESSION_SECRET = 'test-only-session-secret-at-least-32-characters';
+    const config = browserConfig()!;
+    assert.deepEqual(config.sites, []);
+    process.env.APP_ORIGIN = 'http://allot.example';
+    assert.throws(browserConfig, { message: 'INVALID_BROWSER_CONFIG' });
+    server = createAppServer({ config });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const login = await fetch(`${base}/api/session`, { method: 'POST',
+      headers: { Origin: config.origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: config.credential }) });
+    assert.equal(login.status, 200);
+    assert(login.headers.get('set-cookie')!.includes('Secure'));
+    const headers = { Cookie: login.headers.get('set-cookie')!.split(';')[0], Origin: config.origin, 'Content-Type': 'application/json' };
+    assert.deepEqual(await (await fetch(`${base}/api/session`, { headers })).json(), {
+      authenticated: true, mode: 'unconfigured', sites: [],
+    });
+    const id = randomUUID();
+    for (const [path, method] of [
+      ['/api/studies', 'POST'], [`/api/studies/${id}`, 'GET'], [`/api/studies/${id}/start`, 'POST'],
+      [`/api/studies/${id}/sites/site-a/retry`, 'POST'], [`/api/studies/${id}/evidence/${'a'.repeat(64)}`, 'GET'],
+    ]) {
+      const response = await fetch(`${base}${path}`, { method, headers });
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { error: 'CLOUD_NOT_CONFIGURED' });
+    }
+    assert.equal((await fetch(`${base}/api/studies/${id}`)).status, 401);
+    assert.equal((await fetch(`${base}/api/session`, { method: 'DELETE', headers })).status, 200);
+  } finally {
+    if (server) await new Promise<void>(resolve => server!.close(() => resolve()));
+    keys.forEach((key, i) => { if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i]; });
   }
 });
 

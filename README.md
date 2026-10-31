@@ -7,8 +7,8 @@ Implemented: **site-local analysis, reproducible MRI fixtures, durable Relay
 runners, Terse study actors, coordinator recovery, and an authenticated browser
 create/run/results/retry screen**. The runner has passed a
 live single-site Freestyle/hosted Relay gate. Actor/coordinator tests run against
-real local Terse. The minimal HTTP bootstrap is live on free Render; the new
-study application is not deployed. There is no human resolution, final report,
+real local Terse. The browser can be hosted on free Render in authentication-only
+mode while cloud study services are unconfigured. There is no human resolution, final report,
 or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
 and [technical spec](MVP_TECHNICAL_SPEC.md).
 
@@ -82,8 +82,17 @@ Generate random credential/signing values. Each site supplies `site_id`,
 `acquisition_id`, `input_sha256`, and `source_sha256`; no local paths. This
 snapshot must match the immutable site manifests. Also configure the coordinator
 as below, deploy the updated actors, and run `npm run build` before `npm start`.
-Browser configuration without a coordinator fails closed. Do not enable this on
-shared infrastructure without approval. No Render deployment was performed.
+Without a coordinator, browser configuration enables sign-in only: the UI shows
+**Cloud setup pending** and authenticated study/evidence routes return 503
+`CLOUD_NOT_CONFIGURED`. No local adapter is enabled by `npm start`.
+
+For this authentication-only hosting phase, set server-only `APP_ORIGIN`
+(exact HTTPS origin, no trailing slash), `DEMO_CREDENTIAL` (24+ random characters),
+and `SESSION_SECRET` (32+ random characters) instead of `BROWSER_CONFIG`.
+All three are required together. Keep both credentials stable and private;
+never use frontend build variables. A coordinator also requires the private
+site snapshot in `BROWSER_CONFIG`; it cannot start with the empty hosting snapshot.
+Enabling shared cloud infrastructure requires separate approval.
 
 HTTP routes are `POST/GET/DELETE /api/session`, `POST /api/studies`,
 `GET /api/studies/:id`, `POST /api/studies/:id/title`,
@@ -105,8 +114,8 @@ end-to-end run, approval, or final report is claimed.
 
 ## HTTP bootstrap and free Render
 
-Without `BROWSER_CONFIG`, `npm start` runs the HTTP bootstrap on `0.0.0.0` and
-`PORT` (default 3000). `GET /`
+Without any browser authentication configuration, `npm start` runs the HTTP
+bootstrap on `0.0.0.0` and `PORT` (default 3000). `GET /`
 returns an explicit bootstrap status, and `GET /healthz` returns
 `{"status":"ok"}`. Both support HEAD. Unknown routes return 404; writes to these
 read-only endpoints return 405. SIGTERM/SIGINT stop accepting connections and
@@ -114,11 +123,13 @@ allow up to ten seconds to finish requests. The health check proves only HTTP
 liveness, not readiness of Terse, Relay, Freestyle, or a study workflow.
 
 `render.yaml` defines one **free** Node web service with Node 24.22.1 pinned in
-`.node-version`, build command `npm ci --include=dev && npm run check`, start
-command `npm start`, and health check `/healthz`. Native Node TypeScript support
+`.node-version`, build command `npm ci --include=dev && npm run check && npm run build`,
+start command `npm start`, and health check `/healthz`. The build includes the React
+assets. Native Node TypeScript support
 runs the server without a compilation artifact. Auto-deploy is disabled so a
-Git push alone does not deploy future changes. The bootstrap needs no provider
-credentials: do not attach the existing `allot-demo` secret group yet.
+Git push alone does not deploy future changes. Authentication-only hosting needs
+the three browser variables above but no provider credentials: do not attach
+the existing `allot-demo` secret group yet.
 
 Free Render sleeps after 15 minutes without inbound traffic. This is suitable
 for initial hosting checks and supervised development, **not** the uninterrupted

@@ -2,6 +2,8 @@
 
 Status: create/run/results browser phase implemented and locally validated with real voxel analysis, SQLite runners, and authenticated local Terse. The local adapter uses in-memory messaging, not cloud end-to-end execution. A separate single-site Freestyle/hosted Relay crash-recovery gate passed earlier. Completed checks and remaining integration gates are recorded in the technical specification.
 
+The hosted browser can operate in authentication-only mode before cloud agents are connected. After sign-in it shows **Cloud setup pending**, with study creation, analysis, and evidence unavailable; it does not display local results as cloud execution.
+
 **Current phase, not full MVP acceptance:** researcher sign-in, creation, Draft title editing, run, per-scan measurements/previews/provenance, persistent study URLs, and site retry are available. Snapshots refresh every two seconds with a disconnected warning and last-successful timestamp. Reload preview retries retrieval of already-persisted evidence only; independent generation retry and direct managed subscriptions remain deferred. LLM investigation, human decisions, viewer links, finalization, exports, and release of the active-study reservation are not implemented. A second study remains Draft when the pool is busy, including while the active study awaits review. U1–U6 below remain the target contract, not a claim that these deferred workflows exist.
 
 Companion: [technical specification](MVP_TECHNICAL_SPEC.md). Event constraints: [HACKATHON.md](HACKATHON.md).

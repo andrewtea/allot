@@ -9,10 +9,10 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 
 const coordinator = configuredCoordinator();
 const config = browserConfig();
-if (config && !coordinator) throw new Error('BROWSER_REQUIRES_COORDINATOR');
+if (config && coordinator && !config.sites.length) throw new Error('BROWSER_SITE_SNAPSHOT_REQUIRED');
 const stopping = new AbortController();
 let worker: Promise<void> = Promise.resolve();
-const server = createAppServer(config && coordinator ? { config, coordinator } : undefined);
+const server = createAppServer(config ? { config, coordinator } : undefined);
 server.on('error', () => {
   console.error(JSON.stringify({ code: 'HTTP_SERVER_ERROR' }));
   process.exitCode = 1;

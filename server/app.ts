@@ -34,7 +34,7 @@ function send(response: ServerResponse, status: number, body: unknown, head = fa
 }
 
 export interface AppOptions {
-  coordinator: Coordinator;
+  coordinator?: Coordinator;
   config: BrowserConfig;
   mode?: 'local';
   publicDir?: string;
@@ -84,9 +84,10 @@ export function createAppServer(options?: AppOptions) {
           send(response, 200, { authenticated: false }); return;
         }
         if (path === '/api/session' && request.method === 'GET') {
-          send(response, 200, { authenticated: true, mode: options.mode ?? 'managed',
+          send(response, 200, { authenticated: true, mode: coordinator ? options.mode ?? 'managed' : 'unconfigured',
             sites: config.sites.map(s => ({ id: s.site_id, selected: s.selected.length })) }); return;
         }
+        if (!coordinator) throw new HttpError(503, 'CLOUD_NOT_CONFIGURED');
         if (path === '/api/studies' && request.method === 'POST') {
           const body = createSchema.parse(await jsonBody(request));
           const result = await coordinator.create({ study_id: body.id, title: body.title, owner_id: 'researcher', sites: config.sites });

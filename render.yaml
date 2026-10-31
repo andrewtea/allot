@@ -5,7 +5,7 @@ services:
     plan: free
     region: oregon
     branch: main
-    buildCommand: npm ci --include=dev && npm run check
+    buildCommand: npm ci --include=dev && npm run check && npm run build
     startCommand: npm start
     healthCheckPath: /healthz
     autoDeployTrigger: 'off'

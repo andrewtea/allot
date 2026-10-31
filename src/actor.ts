@@ -198,6 +198,11 @@ export class DemoRegistryActor extends Actor {
   }
 
   async releaseFailedStart(studyId: string, commandId: string, revision: number): Promise<void> {
+    // Keep the previous RPC available during rolling application deployments.
+    await this.releaseReservation(studyId, commandId, revision);
+  }
+
+  async releaseReservation(studyId: string, commandId: string, revision: number): Promise<void> {
     const held = this.state.reservation;
     if (held?.study_id === studyId && held.command_id === commandId && held.revision === revision) {
       this.state = { ...this.state, reservation: null };

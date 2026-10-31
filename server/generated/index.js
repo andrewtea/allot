@@ -25,6 +25,7 @@ export const actors = {
                 [
                     { name: "register", result: "void" },
                     { name: "releaseFailedStart", result: "void" },
+                    { name: "releaseReservation", result: "void" },
                     { name: "reserve", result: "value" },
                     { name: "work", result: "value" }
                 ],

@@ -11,7 +11,7 @@ const messages: Record<string, string> = {
   INVALID_CREDENTIAL: 'That demo credential was not recognized. Try again.',
   SIGN_IN_REQUIRED: 'Sign in to open this study.',
   TRY_LATER: 'Too many sign-in attempts. Wait a minute and try again.',
-  POOL_BUSY: 'Another study holds these sites. This study is still a draft. Reservation release is not available in this phase.',
+  POOL_BUSY: 'Another study is analyzing or needs a site retry. This study is still a draft. Try Run analysis again after that study finishes.',
   CONFLICT: 'This study changed in another tab. The current state has been refreshed; review it before trying again.',
   COMMAND_CONFLICT: 'This command conflicts with an earlier request. Reload the study before continuing.',
   NOT_FOUND: 'This study or evidence was not found. Check the study URL.',
@@ -148,7 +148,7 @@ function App() {
           }} />
           <h2>Preconfigured sites</h2><ul className="setup-sites">{session.sites.map(s => <li key={s.id}><span>{siteName(s.id)}</span><span>{s.selected} selected scans</span></li>)}</ul>
           <p className="muted">Workflow: MRI integrity review v1. All sites are required. Raw MRI volumes and local file paths are not shared. Sites B and C contain labeled synthetic corruptions.</p>
-          <p className="notice">This phase stops at results. Investigation, human decisions, viewer sharing, and final reports are not available. One study holds the sites through review; starting another will be blocked.</p>
+          <p className="notice">This phase stops at results. Investigation, human decisions, viewer sharing, and final reports are not available. Sites are released after all analysis and previews finish; previous results remain available.</p>
           <Reopen /></section>
         : !study ? <section className="start"><h1>Opening study</h1><p>Fetching the persisted study snapshot.</p><button onClick={refresh}>Try again</button></section>
         : <>

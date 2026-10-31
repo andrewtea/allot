@@ -198,6 +198,9 @@ test('coordinator resumes durable intent and ACKs only persisted results across 
     assert.equal(sent.length, 2);
     assert.equal(sent[0], sent[1], 'A restart must resend the same request/attempt');
     assert((await snapshot()).sites['site-b'].sent_at);
+    const nextStudy = input();
+    await worker.create(nextStudy);
+    assert.equal((await worker.start(nextStudy.study_id, randomUUID(), 0)).code, 'POOL_BUSY');
     const request = JSON.parse(sent[0]);
     const event = (type: string, suffix: string, payload: unknown) => ({ ...request, type, message_id: `${request.request_id}:${suffix}`, payload });
     const first = event('scan_result', 'scan-one', { result: result('scan-one', 'subject-one'), elapsed_ms: 3 });
@@ -229,6 +232,36 @@ test('coordinator resumes durable intent and ACKs only persisted results across 
     assert.equal(inbox.length, 0, 'Drain all pages after restart');
     assert.equal(Object.keys((await snapshot()).sites['site-b'].results).length, 2);
     assert(logs.includes('COORDINATOR_INBOX_RETRY'), 'Other site outage was exercised');
+    const completed = await snapshot();
+    assert.equal((await registry.work()).reservation, null, 'Completed analysis releases the pool');
+    assert.equal((await worker.start(data.study_id, command, 0)).code, 'STARTED', 'Start replay still succeeds after release');
+    assert.equal((await registry.work()).reservation, null, 'Replay must not reacquire the pool');
+    assert.equal((await worker.start(nextStudy.study_id, randomUUID(), 0)).code, 'STARTED');
+    await registry.releaseReservation(data.study_id, command, 0);
+    assert.equal((await registry.work()).reservation?.study_id, nextStudy.study_id, 'Stale release cannot unlock a newer run');
+    assert.deepEqual(await snapshot(), completed, 'A new study preserves previous results and evidence');
+    const nextActor = actors.StudyActor.get(nextStudy.study_id, transport);
+    const nextRequest = (await nextActor.work() as Study).sites['site-b'].request;
+    const nextEvent = (type: string, suffix: string, payload: unknown) => ({ ...nextRequest, type,
+      message_id: `${nextRequest.request_id}:${suffix}`, payload });
+    await nextActor.accept(nextEvent('job_error', 'error', { code: 'SITE_ANALYSIS_FAILED' }), null);
+    await worker.cycle();
+    assert.equal((await registry.work()).reservation?.study_id, nextStudy.study_id, 'Failed analysis keeps its reservation for retry');
+    await nextActor.retrySite(randomUUID(), 'site-b', (await nextActor.work() as Study).revision);
+    const retry = (await nextActor.work() as Study).sites['site-b'].request;
+    const retryEvent = (type: string, suffix: string, payload: unknown) => ({ ...retry, type,
+      message_id: `${retry.request_id}:${suffix}`, payload });
+    const flagged = result('scan-one', 'subject-one');
+    flagged.checks_passed = false;
+    flagged.findings = [{ code: 'INTERNAL_BLANK_SLAB', intervals_z: [[4, 6]] }];
+    await nextActor.accept(retryEvent('scan_result', 'scan-one', { result: flagged, elapsed_ms: 3 }), png);
+    await nextActor.accept(retryEvent('site_finished', 'finished', { selected_count: 2 }), null);
+    await worker.cycle();
+    assert.equal((await registry.work()).reservation?.study_id, nextStudy.study_id, 'Early completion cannot release missing results');
+    await nextActor.accept(retryEvent('scan_result', 'scan-two', { result: result('scan-two', 'subject-two'), elapsed_ms: 3 }), png);
+    await worker.cycle();
+    assert.equal((await nextActor.work() as Study).lifecycle, 'needs_review');
+    assert.equal((await registry.work()).reservation, null, 'Findings do not retain idle analysis resources');
   } finally {
     await runtime.stop();
     await rm(directory, { recursive: true, force: true });

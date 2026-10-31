@@ -29,9 +29,10 @@ and three sent outbox events. No raw volumes were retrieved centrally.
 
 This is **one simulated site, not the intended three-site deployment**. The
 existing VM retains its bounded TTL/runtime policies. Free Render can sleep;
-this demonstrates supervised execution, not unattended coordination. The study
-holds the pool through review, so use its saved URL to inspect results; another
-study cannot run until reservation release is implemented. Investigation,
+this demonstrates supervised execution, not unattended coordination. Sites are
+released automatically after all analysis and required previews finish, allowing
+another study without deleting previous results. Failed runs retain the pool
+for site retry; active runs cannot overlap. Investigation,
 approvals, collaboration, and reports are still unavailable.
 
 ## Local development
@@ -82,8 +83,9 @@ This phase intentionally stops at results. There are no LLM investigations,
 approvals, viewer links, finalization, or exports. A missing generated preview
 currently requires retrying its site's analysis; independent **Retry preview**
 and direct managed WebSocket subscriptions are deferred. This is not full U4/U6
-acceptance. The registry keeps the active study reserved through review, so a
-second study may be created but cannot run. No reset/release button is provided.
+acceptance. The registry reserves the pool during analysis and failed-site
+recovery, then releases it once all sites complete or need review with persisted
+evidence. Previous study URLs and previews remain readable. No reset is needed.
 For a separate **disposable local** validation pool, run
 `node scripts/local-study.ts <private-state-directory> <prepared-fixture-directory>`
 on another port. Do not delete an existing study's data to reuse the pool.
@@ -293,7 +295,7 @@ runtime restart, reservations, retries, replay, and read-only WebSocket grants.
 This requires Bun (1.4.2+) as well as Node and the Python test environment.
 
 This is the create/run/results foundation, not the complete study workflow.
-Investigation, human decisions, finalization/releasing the active reservation
+Investigation, human decisions, and finalization
 still need implementation. Managed authentication and persistence have passed
 for the one-site run above; six-scan managed evidence capacity and full managed
 restart/recovery remain unverified.

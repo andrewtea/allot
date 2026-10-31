@@ -36,6 +36,10 @@ export class Coordinator {
   }
 
   async start(studyId: string, commandId: string, revision: number) {
+    const actor = actors.StudyActor.get(studyId, this.transport);
+    const study = await actor.work() as Study | null;
+    // A replay must return its original outcome without reserving idle sites again.
+    if (!study || study.lifecycle !== 'draft') return actor.start(commandId, revision);
     const registry = actors.DemoRegistryActor.get('demo', this.transport);
     const reservation = await registry.reserve(studyId, commandId, revision);
     if (!reservation.ok) return reservation;
@@ -49,7 +53,8 @@ export class Coordinator {
   }
 
   async cycle() {
-    const registry = await actors.DemoRegistryActor.get('demo', this.transport).work();
+    const registryActor = actors.DemoRegistryActor.get('demo', this.transport);
+    const registry = await registryActor.work();
     const held = registry.reservation;
     // Crash after reservation but before actor start: complete the same command.
     if (held) await this.#resumeStart(held.study_id, held.command_id, held.revision);
@@ -82,6 +87,14 @@ export class Coordinator {
         }
       } catch { this.report('COORDINATOR_INBOX_RETRY', site.siteId); }
     }));
+    if (held) {
+      const current = await actors.StudyActor.get(held.study_id, this.transport).work() as Study | null;
+      // Results/evidence are durable before release. Failed or unfinished runs retain
+      // the pool for retry; a stale worker cannot release another study's reservation.
+      if (current?.lifecycle === 'needs_review' || current?.lifecycle === 'ready_to_finalize') {
+        await registryActor.releaseReservation(held.study_id, held.command_id, held.revision);
+      }
+    }
   }
 
   async #receive(site: SiteConnection, item: InboxItem, registered: Set<string>) {

@@ -74,6 +74,10 @@ export declare namespace actors {
                 Args: Parameters<Stub["releaseFailedStart"]>
                 Result: Awaited<ReturnType<Stub["releaseFailedStart"]>>
             }
+            ["releaseReservation"]: {
+                Args: Parameters<Stub["releaseReservation"]>
+                Result: Awaited<ReturnType<Stub["releaseReservation"]>>
+            }
             ["reserve"]: {
                 Args: Parameters<Stub["reserve"]>
                 Result: Awaited<ReturnType<Stub["reserve"]>>
@@ -98,6 +102,10 @@ export declare namespace actors {
             namespace releaseFailedStart {
                 type Args = $MethodTypes["releaseFailedStart"]["Args"]
                 type Result = $MethodTypes["releaseFailedStart"]["Result"]
+            }
+            namespace releaseReservation {
+                type Args = $MethodTypes["releaseReservation"]["Args"]
+                type Result = $MethodTypes["releaseReservation"]["Result"]
             }
             namespace reserve {
                 type Args = $MethodTypes["reserve"]["Args"]

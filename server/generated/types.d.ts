@@ -11,6 +11,7 @@ interface $DemoRegistryActorContract {
     Methods: {
         register(studyId: string): Promise<void>
         releaseFailedStart(studyId: string, commandId: string, revision: number): Promise<void>
+        releaseReservation(studyId: string, commandId: string, revision: number): Promise<void>
         reserve(studyId: string, commandId: string, revision: number): Promise<Outcome>
         work(): Promise<Registry>
     }

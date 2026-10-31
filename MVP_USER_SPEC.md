@@ -1,6 +1,6 @@
 # MVP user specification: federated imaging study
 
-Status: proposed implementation baseline, based on the planning conversation. No MVP application has been built or tested end to end; tooling checks are recorded in the technical specification.
+Status: implementation baseline. The image-analysis pipeline, public MRI fixture, and durable site runner are implemented and validated, including a single-site Freestyle/hosted Relay crash-recovery gate. The MVP application has not been built or tested end to end; completed checks and remaining integration gates are recorded in the technical specification.
 
 Companion: [technical specification](MVP_TECHNICAL_SPEC.md). Event constraints: [HACKATHON.md](HACKATHON.md).
 
@@ -114,11 +114,11 @@ The report describes measured integrity checks and their limitations. It contain
 
 ## 6. Demo dataset and story
 
-Proposed fixture: six selected T1-weighted MRI acquisitions, two per site, plus one compatible alternate for one selected subject. Dataset source, redistribution permissions, attribution, download size, and runtime must be verified before choosing the actual files.
+Locally validated fixture: six selected T1-weighted MRI acquisitions, two per site, plus one compatible alternate for one selected subject. Source: CC0 OpenNeuro ds000114 version 1.0.2, subjects 01–06's test acquisitions and subject 03's actual retest. Source attribution, pinned downloads (about 64.9 MB total), and reproducible preparation commands are in the [README](README.md#public-fixture-and-attribution). Runtime and isolation in Freestyle remain to be verified.
 
-- Site A: ordinary readable scans; no intervention expected after fixture validation.
-- Site B: one selected scan with a deliberately blanked internal slab, plus a passing alternate for the same subject.
-- Site C: one selected scan with deliberately zeroed signal and no alternate.
+- Site A: subjects 01 and 02; both pass the local integrity checks.
+- Site B: subjects 03 and 04; subject 03 has a deliberately blanked internal slab at canonical axial slices 100–102, plus a passing retest acquisition. Blanking also shifts the percentile window and flags marginal slices 248–249; all flagged intervals stay visible as heuristic findings.
+- Site C: subjects 05 and 06; subject 05 has deliberately zeroed signal and no alternate.
 
 Expected walkthrough, after fixture checks: run all sites, inspect B's local investigation, approve B's replacement, exclude C's failed subject with a reason, and finalize. Final counts: six initially selected, five included, one excluded subject, one replacement. The rejected original at B is not counted as an additional excluded subject.
 

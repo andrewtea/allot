@@ -1,6 +1,6 @@
 # MVP technical specification: federated imaging study
 
-Status: proposed implementation baseline, not an implemented or benchmarked system.
+Status: implementation started. The voxel-analysis pipeline, public MRI fixture, and durable site runner are implemented. A single-site Freestyle/hosted Relay gate passed, including crash and pause/resume recovery. The application, actor-backed workflow, and LLM investigation are not implemented or tested end to end. See [README](README.md) for runnable commands.
 
 User contract: [MVP_USER_SPEC.md](MVP_USER_SPEC.md). Workflow IDs U1–U6 are shared between the documents. If implementation changes a user-visible contract, update both specs together.
 
@@ -59,7 +59,47 @@ OpenAI calls from a site use Freestyle's documented outbound TLS credential inje
 6. Verify snapshot-based workspace preparation, supervised runner restart, pause/resume recovery, and site model calls using edge-injected credentials. Verify the effective VM expiration policy covers the demo.
 7. Verify the single paid Render Web Service serves the UI and backend over HTTPS, including direct study URLs and secure-cookie access. Close the browser during a run and confirm work continues; restart/redeploy the service mid-run and verify pending jobs recover without duplicate analyses or lost decisions. Verify browser reconnection to managed Terse and finalized exports after restart. Render deployment remains unverified until this gate passes.
 
-If a gate fails, report the specific blocker and revise both specs rather than substituting fake results, silently removing image analysis, or changing vendors. Do not provision billable/shared resources without authorization. No runtime versions or dataset IDs are considered selected until these checks pass.
+If a gate fails, report the specific blocker and revise both specs rather than substituting fake results, silently removing image analysis, or changing vendors. Do not provision billable/shared resources without authorization. Local fixture/dependency selections below remain subject to the Freestyle and managed-service gates.
+
+### Local analysis gate verification
+
+`analysis/integrity.py` implements the deterministic analysis contract and bounded PNG generation. `analysis/prepare_fixture.py` downloads and validates one site's fixture, without provisioning resources. Runtime dependencies are pinned in `pyproject.toml` and `uv.lock`: nibabel 5.4.2, NumPy 2.4.6, Matplotlib 3.11.2, and Pillow 13.0.0 (lossless grayscale PNG encoding). Local validation used Python 3.11.6.
+
+The fixture uses CC0 OpenNeuro ds000114 version 1.0.2, Git snapshot `6299834614e9ae7df1e2fc5922545331b5c7f022`: subjects 01–06, test session, plus subject 03's actual retest acquisition. All seven unmodified acquisitions pass. Site B's synthetic zeroed axial slab at canonical z=100–102 flags; site C's fully zeroed volume flags degenerate signal. The alternate passes. Attribution and immutable source/derived hashes are recorded in manifests and results; see [dataset details](README.md#public-fixture-and-attribution).
+
+The slab corruption changes the percentile window and also flags marginal slices 248–249 in B. Both intervals and their neighboring evidence slices are retained. This illustrates the documented heuristic limitation; the implementation does not hide extra findings or add scan-specific detector exceptions.
+
+An orb run on 2026-10-31 analyzed the seven prepared acquisitions in approximately 9.4 seconds total across sequential site runs. Source downloads total 64,889,860 bytes; the seven result montages total 445,460 bytes, each below 150 KiB. These are local measurements, **not** a Freestyle benchmark, managed actor capacity check, or full-demo latency. Tests cover asymmetric physical measurements, canonical axes, threshold boundaries, compressed/corrupt inputs, nonfinite values, hash/path rejection, and retryable preview failures. No approvals or final counts have been executed yet.
+
+### Headless Relay setup research
+
+Source review on 2026-10-31 found `@agent-relay/sdk` **15.0.1** supports custom headless TypeScript workers (Node 22+). Desktop session registration and `@agent-relay/harness-driver` are unnecessary for this app. Use the [current SDK source/README](https://github.com/agentworkforce/relay/tree/7c8962049c7747449839d5f41ceb4cefa1b08158/packages/sdk), not the public TypeScript guide's older 7.1.1 spawn/broker examples. The application now pins SDK 15.0.1 and overrides `@relaycast/sdk` / `@relaycast/types` to 8.14.0 in `package-lock.json`; the live gate below verified this combination. Node 22.18+ is required for native TypeScript execution. Zod is pinned to 4.6.7 rather than the vulnerable initial 4.4.3 candidate.
+
+- The [hosted API](https://agentrelay.com/docs/markdown/relaycast-api.md) documents unauthenticated workspace creation at `POST https://armadillo.agentrelay.com/v1/workspaces`; it returns a workspace key once. The authorized test creation returned HTTP 201; registration and authenticated calls for two agent tokens succeeded without another user-provided secret. Ownership/recovery, quotas, retention guarantees, and billing remain unverified. Further provisioning requires authorization.
+- Pass `baseUrl` explicitly as `https://armadillo.agentrelay.com` (without `/v1`). Legacy `rk_*` keys belong to `https://cast.agentrelay.com`; do not probe alternate origins with a credential. The audited SDK defaults to the legacy origin.
+- Proposed app configuration: nonsecret `RELAY_BASE_URL`; bootstrap-only `RELAY_WORKSPACE_KEY`; separate persisted `RELAY_AGENT_TOKEN` per runner/coordinator process. These are application-chosen environment names. Keep the admin key off site VMs, persist issued agent tokens securely, and reconnect instead of registering again on every restart (duplicate registration is a conflict).
+- Start the live gate with one disposable hosted workspace and two identities. For the full demo, prefer a separate workspace for each site/coordinator pair: ordinary agent tokens have broad workspace read access, so four identities or private-looking channel names in one workspace are not a cross-site confidentiality boundary. This does not change the centrally operated simulated-site disclaimer.
+- Use `RelaycastMessagingClient({ agentToken, baseUrl })` from `@agent-relay/sdk/messaging`, repeated `inbox.list(...)`, and `inbox.ack(...)` only after the application's durable job/event commit. Do not call `events.connect()` or `inbox.subscribe()` for durable intake: the audited 8.x WebSocket client automatically acknowledges delivery before asynchronous handlers finish. Keep Allot's own idempotency, result outbox, and restart reconciliation.
+- Carry the versioned envelope in JSON message text, not only metadata: the audited replay projection omits arbitrary metadata. Authenticate the sender from transport identity and its configured site mapping, not self-declared envelope fields. ACK means durable intake, not finished analysis.
+
+Source checks alone established an API path; the subsequent authorized live gate below supplies execution evidence. The retained test credentials are private ignored files, not application-wide production configuration.
+
+### Single-site Freestyle / hosted Relay gate
+
+On 2026-10-31, `scripts/check-site-integration.ts` passed against one persistent Ubuntu Freestyle VM (2 vCPU, 4 GiB RAM, 16 GiB disk), Node 26.13.0, Python 3.12.3, and one hosted Relay workspace with coordinator/site identities. Site B downloaded its own three source acquisitions (25,814,151 bytes) and prepared the synthetic slab locally. No raw volumes were transferred to the coordinator during the gate. Only the site's Relay token was installed in the guest; provider/admin keys stayed in the orb. DNS on UDP/TCP 53 had to be allowed in addition to outbound HTTPS 443; no inbound service was exposed.
+
+Verified through hosted REST messaging and real Python execution:
+
+- Work queued while the runner was offline remained available. SIGKILL after durable intake but before ACK left a pending job with zero executions; the restarted systemd runner completed it once.
+- Both selected scans returned valid evidence: the synthetic slab failed its check, while the unchanged control passed. A duplicate command with a new transport message ID produced no new results or execution.
+- SIGKILL after Relay accepted the first result but before the sender marked it sent left all three outbox events unsent locally. Restart recovered three unique result/completion events without rerunning the completed job. This verifies these crash boundaries, not universal exactly-once delivery.
+- Conflicting request IDs, wrong site, wrong manifest hash, invalid payload, and non-allowlisted authenticated sender were rejected without new jobs. The first sender-control attempt used a self-DM, which Relay did not enqueue; the corrected control temporarily changed the expected sender ID and passed. No extra identity was provisioned.
+- `vm.fs.readFile` retrieved a 121,283-byte PNG while the VM remained paused; SHA-256, PNG signature, and size checks passed. Visual inspection confirmed a blank z=101 panel between signal-bearing z=99/103 panels. The montage samples the midpoint and neighbors of each detected interval; it does not display every slice. The extra marginal interval remains disclosed.
+- A request queued while paused completed after resume. Across three executions, the two selected scans took 5.134, 4.948, and 4.775 seconds (median 4.948). The resumed systemd service reported peak cgroup memory 371,503,104 bytes and CPU usage 6.236 seconds, including its Node process and Python children. This is not a three-site or full-workflow benchmark.
+
+The VM was left paused with its service stopped, not deleted. Effective limits: TTL 86,400 seconds, continuous runtime 1,800 seconds, total runtime 3,600 seconds; no idle timeout or separate auto-delete duration was reported. Relay returned no workspace expiry; that is not a retention or billing guarantee. The harness never provisions new resources and requires an already-prepared disposable VM; setup and private configuration are described in the README.
+
+Local validation additionally covers a queue larger than 200 messages, oversize rejection, safe tool errors, input mutation, and durable result reuse with real Python/SQLite and an in-memory messaging boundary. Not yet verified: long outages, expired/deferred deliveries, token rotation, cross-workspace isolation, VM stop/boot recovery, base-snapshot cloning, edge-injected model calls, managed study actors, final report persistence, or the complete application. The initial runner also lacks actor-side reservations/stale-attempt arbitration, progress deadlines, cached tool reuse across attempts, and investigation/retry-preview operations.
 
 ### Terse quickstart verification
 
@@ -79,12 +119,12 @@ For the managed test, securely configure server-only `TERSE_ACTOR_URL` and `TERS
 | `OPENAI_API_KEY` | OpenAI project with model access and budget; backend/coordinator and edge-injection setup, never base snapshots | Yes |
 | `TERSE_API_KEY` | Terse application API token for the organization/project; backend/generated-client calls | Yes |
 | `TERSE_ACTOR_URL` | Managed deployment output; quickstart URL above is not automatically the future MVP URL | No |
-| Relay credentials and workspace/address IDs | Determine exact requirements and names during the headless integration gate; scope each site identity separately | Credentials yes; IDs generally no |
+| `RELAY_BASE_URL`, bootstrap workspace key, per-process agent token | Single-site hosted gate verified; persist tokens securely and bind each to its workspace/origin; full-demo provisioning remains pending | Keys/tokens yes; URL and IDs no |
 | Demo researcher credential and viewer capability signing/token material | Generate during implementation; no user-provided password needed | Yes |
 
 Enter user-provided keys through Amp's masked secret dialog or the project's Secrets & Env Vars settings, never chat or tracked files. Prefer project scope `andrewtea/allot`. After setting/changing injected secrets, refresh the orb environment with `amp orb restart-processes` before testing them. Do not print secret values or commit `.env` files. No Supabase secret is needed.
 
-The three named API keys are configured as private project secrets and passed minimal read-only authentication checks: Freestyle VM listing succeeded, OpenAI model listing returned HTTP 200, and Terse's deployed contract returned HTTP 200 (unauthenticated control: HTTP 401). No VM creation, inference, or deployment changes were performed during those checks. These checks do not establish billing capacity or permission for every MVP operation. Relay credentials remain unconfigured.
+The three named API keys are configured as private project secrets and passed minimal read-only authentication checks: Freestyle VM listing succeeded, OpenAI model listing returned HTTP 200, and Terse's deployed contract returned HTTP 200 (unauthenticated control: HTTP 401). No VM creation, inference, or deployment changes were performed during those initial checks. The subsequent authorized Freestyle/Relay gate is recorded above. These checks do not establish billing capacity or permission for every MVP operation; Relay's test credentials are not yet a full-demo deployment configuration.
 
 ## 3. Analysis contract: mri-integrity-v1
 

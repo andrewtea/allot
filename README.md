@@ -1,0 +1,131 @@
+# Allot
+
+Image-backed integrity review across simulated research sites. Public research
+data only; not for clinical use.
+
+The first implementation is the **site-local analysis pipeline, reproducible MRI
+fixture, and durable Relay runner**. The runner has passed a live single-site
+Freestyle/hosted Relay gate, including crash recovery. There is no application UI,
+actor workflow, or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
+and [technical spec](MVP_TECHNICAL_SPEC.md).
+
+## Local development
+
+Use Python 3.11+, [uv](https://docs.astral.sh/uv/), and Node 22.18+. These commands
+need no provider credentials and create no cloud resources. The runner test uses
+the real Python pipeline and SQLite with an in-memory messaging boundary:
+
+```bash
+uv sync --locked
+uv run pytest -q
+uv run ruff check analysis tests
+uv run ruff format --check analysis tests
+npm ci
+npm run check
+npm test
+```
+
+Prepare each site's fixture independently (about 64.9 MB downloaded in total):
+
+```bash
+uv run python -m analysis.prepare_fixture --site a --output .local/sites/a
+uv run python -m analysis.prepare_fixture --site b --output .local/sites/b
+uv run python -m analysis.prepare_fixture --site c --output .local/sites/c
+```
+
+Each command checks the downloaded files against the pinned source snapshot,
+analyzes the unmodified acquisitions, creates the labeled synthetic derivatives,
+and validates their actual voxel results and PNG evidence. It writes a local
+`manifest.json`, `validation.json`, and content-addressed `evidence/*.png`.
+Preparation is an offline setup step: **do not run it on an active study's
+dataset**. In deployment run each command only inside its assigned site VM;
+keeping all three fixtures in this orb is development validation, not proof of
+site isolation. Raw volumes and generated artifacts are ignored by Git.
+
+Analyze one acquisition using its manifest identity (never an agent-provided path):
+
+```bash
+uv run python -m analysis.integrity \
+  --dataset-root .local/sites/b \
+  --manifest .local/sites/b/manifest.json \
+  --acquisition-id sub-03-test \
+  --evidence-dir .local/sites/b/evidence
+```
+
+The CLI emits JSON measurements, findings, provenance, and artifact IDs. Exit 0
+means the tool completed, **not** that the scan passed. Integrity failures are
+findings; input/hash failures exit 1 with a safe error code. A missing preview
+is retryable and distinct from an unrenderable volume. Future finalization must
+check evidence readiness separately from `checks_passed`.
+
+## Public fixture and attribution
+
+Source: **Gorgolewski KJ, Storkey A, Bastin ME, Whittle IR, Wardlaw JM, Pernet CR**,
+*A test-retest fMRI dataset for motor, language and spatial attention functions*.
+[Dataset DOI](https://doi.org/10.18112/openneuro.ds000114.v1.0.2),
+[publication](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3641991/).
+
+The dataset declares [CC0 in its versioned metadata](https://github.com/OpenNeuroDatasets/ds000114/blob/6299834614e9ae7df1e2fc5922545331b5c7f022/dataset_description.json).
+Preparation pins the 1.0.2 Git snapshot and checks its git-annex size/MD5 against
+the public S3 downloads, then records SHA-256 for every source and derived input.
+License, authors, source version, source hash, and transformations accompany results.
+
+| Site | Selected acquisitions | Synthetic modification | Alternate |
+| --- | --- | --- | --- |
+| A | Subjects 01, 02; test session | None | None |
+| B | Subjects 03, 04; test session | Subject 03: zero canonical axial slices 100–102 inclusive | Subject 03's actual retest acquisition |
+| C | Subjects 05, 06; test session | Subject 05: zero every voxel | None |
+
+All seven unmodified source acquisitions pass the implemented checks. The
+synthetic B and C scans produce blank-slab and degenerate-signal findings,
+respectively. The B alternate passes. This validates the fixture, not the
+unimplemented approval workflow or final inclusion counts.
+
+**Heuristic limitation:** blanking B's slab changes the global percentile window;
+the detector also flags marginal low-occupancy slices 248–249. Those findings
+and their evidence are retained, not filtered to the known injected slab.
+These checks do not establish anatomical coverage or clinical suitability.
+
+## Site runner and live integration gate
+
+The [technical spec's Relay setup notes](MVP_TECHNICAL_SPEC.md#headless-relay-setup-research)
+identify the headless SDK, hosted endpoint, bootstrap keys, per-agent tokens,
+and explicit delivery acknowledgement requirements. Hosted provisioning and
+single-site messaging are now verified with SDK 15.0.1 / Relaycast 8.14.0.
+
+`site/main.ts` consumes a private JSON configuration containing `siteId`,
+`coordinatorId` (authenticated Relay ID), `coordinatorName`, `datasetRoot`,
+`evidenceDir`, `projectRoot`, `python`, `database`, `relayBaseUrl`, and
+`relayAgentToken`. The last value is **only that site's agent token**. Keep the
+workspace admin key and all provider keys outside the VM. Run one consumer per
+site; `site/allot-site.service` gives the tested Ubuntu installation paths.
+Keep the manifest and inputs immutable during a study.
+
+The runner accepts bounded `analyze_site` requests, commits intake to SQLite
+before ACK, and commits results plus a retryable outbox atomically. It rejects
+conflicting request IDs and non-allowlisted senders. Completed commands are not
+rerun; interrupted, uncommitted analysis can run again. This is not an
+exactly-once execution guarantee. Stale-attempt arbitration, study reservations,
+actor reconciliation, tool caching, and investigation remain unimplemented.
+
+`node scripts/check-site-integration.ts <private-config.json>` reruns the live
+gate against **existing disposable resources**. It starts/stops the service,
+injects two process crashes, sends test messages, resumes the VM, and leaves it
+paused. Do not point it at an active study. The private config contains `vmId`,
+`relayBaseUrl`, and `coordinator` / `site` objects each with `id`, `name`, `token`.
+The VM must have metadata `purpose=integration-gate`, the project/dependencies
+installed under `/srv/allot`, Python at `/opt/venv/bin/python`, and Site B prepared
+under `/srv/allot/data`. The script uploads the current runner/analysis code,
+but does not provision resources or prepare datasets. It requires the operator's
+`FREESTYLE_API_KEY` in the orb and persists received events before acknowledging
+them. Private configuration/results live under ignored `.local/integration`.
+
+The authorized gate used one 2-vCPU/4-GiB VM and two Relay identities. Site B's
+two selected scans took a median **4.948 seconds** across three executions;
+the resumed service's peak cgroup memory was **354.3 MiB**. A 121,283-byte montage
+was retrieved while paused and verified by SHA-256 and PNG signature. These are
+single-site measurements, not full-MVP latency. Outbound HTTPS **and DNS** need
+firewall rules; there is no public inbound service. The test VM is paused, not
+deleted, with a 24-hour TTL, 30-minute continuous runtime cap, and one-hour total
+runtime budget. The hosted workspace is retained; billing/retention guarantees
+remain unverified. Additional cloud provisioning/deployment needs approval.

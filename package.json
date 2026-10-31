@@ -1,0 +1,25 @@
+{
+  "name": "allot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@agent-relay/sdk": "15.0.1",
+    "freestyle": "0.2.21",
+    "zod": "4.6.7"
+  },
+  "overrides": {
+    "@relaycast/sdk": "8.14.0",
+    "@relaycast/types": "8.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

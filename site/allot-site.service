@@ -1,0 +1,19 @@
+[Unit]
+Description=Allot site-local MRI analysis runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/srv/allot
+Environment=HOME=/home/ubuntu
+Environment=MPLCONFIGDIR=/srv/allot/state/matplotlib
+ExecStart=/usr/local/bin/node /srv/allot/site/main.ts /etc/allot-site.json
+Restart=always
+RestartSec=3
+TimeoutStopSec=150
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

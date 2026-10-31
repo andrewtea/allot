@@ -5,19 +5,25 @@
   "scripts": {
     "start": "node server/main.ts",
     "check": "tsc --noEmit",
+    "actors:dev": "terse actor dev",
+    "actors:generate": "terse actor generate --out-dir server/generated --non-interactive",
     "test": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
     "@agent-relay/sdk": "15.0.1",
     "freestyle": "0.2.21",
+    "terse-sdk": "0.14.9",
     "zod": "4.6.7"
   },
   "overrides": {
     "@relaycast/sdk": "8.14.0",
-    "@relaycast/types": "8.14.0"
+    "@relaycast/types": "8.14.0",
+    "glob": "14.0.3",
+    "minimatch": "11.0.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "terse-cli": "0.14.9",
     "typescript": "^5.9.0"
   },
   "engines": {

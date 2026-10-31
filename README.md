@@ -135,8 +135,8 @@ The runner accepts bounded `analyze_site` requests, commits intake to SQLite
 before ACK, and commits results plus a retryable outbox atomically. It rejects
 conflicting request IDs and non-allowlisted senders. Completed commands are not
 rerun; interrupted, uncommitted analysis can run again. This is not an
-exactly-once execution guarantee. Stale-attempt arbitration, study reservations,
-actor reconciliation, tool caching, and investigation remain unimplemented.
+exactly-once execution guarantee. Study actors now provide stale-attempt
+arbitration and reservations; tool caching and investigation remain unimplemented.
 
 `node scripts/check-site-integration.ts <private-config.json>` reruns the live
 gate against **existing disposable resources**. It starts/stops the service,
@@ -159,3 +159,27 @@ firewall rules; there is no public inbound service. The test VM is paused, not
 deleted, with a 24-hour TTL, 30-minute continuous runtime cap, and one-hour total
 runtime budget. The hosted workspace is retained; billing/retention guarantees
 remain unverified. Additional cloud provisioning/deployment needs approval.
+
+## Study actors
+
+`src/actor.ts` implements the Terse study snapshot and demo-pool registry.
+The actor persists analysis intent, accepted results and bounded PNG evidence;
+retries create new attempt IDs, retain valid results, and reject late responses.
+An early site-finished event cannot hide missing results. Missing previews block
+completion. A durable five-minute no-progress alarm makes failed sites retryable.
+Viewer sockets emit revisions only and reject client commands; authenticated
+backend calls retrieve state. Researcher sessions and public study routes are
+not implemented yet.
+
+Run `npm run actors:dev` for local actors and `npm run actors:generate` after
+changing their contract. For local tooling, unset injected managed
+`TERSE_API_KEY` / `TERSE_ACTOR_URL` so those credentials are not used locally.
+Generated clients are checked in; do not edit them. `npm test` starts disposable,
+authenticated local Terse runtimes and verifies persisted evidence after a full
+runtime restart, reservations, retries, replay, and read-only WebSocket grants.
+This requires Bun (1.4.2+) as well as Node and the Python test environment.
+
+This is the create/run/results foundation, not the complete study workflow.
+Investigation, human decisions, finalization/releasing the active reservation,
+and the UI still need implementation. Managed Terse deployment, actor capacity,
+and managed authentication/persistence remain explicit deployment gates.

@@ -12,7 +12,7 @@ interface $DemoRegistryActorContract {
         register(studyId: string): Promise<void>
         releaseFailedStart(studyId: string, commandId: string, revision: number): Promise<void>
         releaseReservation(studyId: string, commandId: string, revision: number): Promise<void>
-        reserve(studyId: string, commandId: string, revision: number): Promise<Outcome>
+        reserve(studyId: string, commandId: string, revision: number, kind?: string): Promise<Outcome>
         work(): Promise<Registry>
     }
 }
@@ -30,7 +30,18 @@ interface $StudyActorContract {
     Methods: {
         /** Persist valid events before the coordinator ACKs the Relay delivery. */
         accept(raw: unknown, preview: string | null): Promise<string>
+        decide(
+            commandId: string,
+            key: string,
+            action: string,
+            reason: string,
+            candidateId: string | null,
+            revision: number
+        ): Promise<Outcome>
+        finalize(commandId: string, revision: number): Promise<Outcome>
         initialize(input: unknown): Promise<Outcome>
+        investigate(commandId: string, revision: number): Promise<Outcome>
+        markInvestigationSent(key: string, requestId: string): Promise<void>
         markSent(siteId: string, requestId: string): Promise<void>
         retrySite(commandId: string, siteId: string, revision: number): Promise<Outcome>
         start(commandId: string, revision: number): Promise<Outcome>
@@ -57,6 +68,7 @@ type Reservation = {
     study_id: string
     command_id: string
     revision: number
+    kind?: string
 }
 
 export {}

@@ -75,7 +75,8 @@ const coordinator = new Coordinator(inputs.map(input => {
   const relay = channel();
   const runner = new SiteRunner({ siteId: input.site_id, coordinatorId: 'coordinator', coordinatorName: 'coordinator',
     datasetRoot, evidenceDir: join(datasetRoot, 'evidence'), projectRoot: root,
-    python: resolve(root, '.venv/bin/python'), database: join(directory, `${input.site_id}.sqlite`) }, relay.site);
+    python: resolve(root, '.venv/bin/python'), database: join(directory, `${input.site_id}.sqlite`),
+    modelApiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini' }, relay.site);
   // Simulated queues are volatile. Replay durable outboxes after a dev-process restart.
   runner.db.exec('UPDATE outbox SET sent=0');
   runners.push(runner);

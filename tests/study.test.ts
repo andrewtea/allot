@@ -10,6 +10,8 @@ import { actors, createActorTransport } from '../server/generated/index.js';
 import { Coordinator, type SiteConnection } from '../server/coordinator.ts';
 import { studyInputSchema, type StudyInput, type ScanResult } from '../study/protocol.ts';
 import type { Study } from '../study/state.ts';
+import { inclusion } from '../study/state.ts';
+import { markdownReport, reportSnapshot } from '../server/report.ts';
 
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7WQAAAAASUVORK5CYII=';
 const artifact = createHash('sha256').update(Buffer.from(png, 'base64')).digest('hex');
@@ -260,8 +262,54 @@ test('coordinator resumes durable intent and ACKs only persisted results across 
     assert.equal((await registry.work()).reservation?.study_id, nextStudy.study_id, 'Early completion cannot release missing results');
     await nextActor.accept(retryEvent('scan_result', 'scan-two', { result: result('scan-two', 'subject-two'), elapsed_ms: 3 }), png);
     await worker.cycle();
-    assert.equal((await nextActor.work() as Study).lifecycle, 'needs_review');
-    assert.equal((await registry.work()).reservation, null, 'Findings do not retain idle analysis resources');
+    const investigating = await nextActor.work() as Study;
+    assert.equal(investigating.lifecycle, 'running');
+    const fresh = (await registry.work()).reservation!;
+    assert.equal(fresh.kind, 'investigation', 'Follow-up obtains a fresh reservation');
+    assert.notEqual(fresh.command_id, command);
+    await registry.releaseReservation(nextStudy.study_id, command, 0);
+    assert.equal((await registry.work()).reservation?.command_id, fresh.command_id);
+    assert.equal((await nextActor.finalize(randomUUID(), investigating.revision)).ok, false);
+    const key = 'site-b:scan-one';
+    const job = investigating.investigations![key];
+    const candidate = result('retest-one', 'subject-one');
+    const proposal = { action: 'replace', reason: 'Retest passes; original has an internal blank slab.', candidate,
+      model: 'test-model', tool_calls: 3, trace: [
+        { tool: 'list_alternates', arguments: { subjectId: 'subject-one' }, output: [{ acquisition_id: 'retest-one' }] },
+        { tool: 'compare_acquisitions', arguments: { originalId: 'scan-one', alternateId: 'retest-one' }, output: { compatible: true, input_sha256: inputHash } },
+        { tool: 'analyze_scan', arguments: { acquisitionId: 'retest-one' }, output: candidate },
+      ] };
+    const proposed = { ...job.request, type: 'finding_proposal', message_id: `${job.request.request_id}:proposal`, payload: { proposal } };
+    const bad = structuredClone(proposed); bad.payload.proposal.candidate.subject_id = 'subject-two';
+    assert.equal(await nextActor.accept(bad, png), 'INVALID_CANDIDATE');
+    assert.equal(await nextActor.accept(proposed, null), 'EVIDENCE_REQUIRED');
+    assert.equal(await nextActor.accept(proposed, png), 'ACCEPTED');
+    assert.equal(await nextActor.accept(proposed, null), 'DUPLICATE');
+    await worker.cycle();
+    assert.equal((await registry.work()).reservation, null);
+    const review = await nextActor.work() as Study;
+    assert.equal(inclusion(review).filter(s => s.status === 'unresolved').length, 1, 'Agent cannot change inclusion');
+    const decisionId = randomUUID();
+    const decisions = [
+      await nextActor.decide(decisionId, key, 'replace', 'Researcher reviewed passing retest', 'retest-one', review.revision),
+      await nextActor.decide(randomUUID(), key, 'exclude', 'Competing tab', null, review.revision),
+    ];
+    assert.equal(decisions.filter(d => d.ok).length, 1);
+    assert.equal(decisions[0].ok, true);
+    assert.deepEqual(await nextActor.decide(decisionId, key, 'replace', 'Researcher reviewed passing retest', 'retest-one', review.revision), decisions[0]);
+    const resolved = await nextActor.work() as Study;
+    assert.equal(resolved.lifecycle, 'ready_to_finalize');
+    assert.equal((await nextActor.finalize(randomUUID(), review.revision)).ok, false, 'Stale finalization rejected');
+    const finalizeId = randomUUID();
+    assert.equal((await nextActor.finalize(finalizeId, resolved.revision)).ok, true);
+    const frozen = await nextActor.work() as Study;
+    assert.deepEqual(reportSnapshot(frozen).counts, { selected: 2, included: 2, excluded: 0, replaced: 1 });
+    assert(markdownReport(frozen).includes(`data:image/png;base64,${png}`));
+    assert.equal(frozen.sites['site-b'].results['scan-one'].checks_passed, false, 'Rejected original retained');
+    assert.equal((await nextActor.decide(randomUUID(), key, 'exclude', 'Too late', null, frozen.revision)).ok, false);
+    assert.equal((await nextActor.investigate(randomUUID(), frozen.revision)).ok, false);
+    await nextActor.markSent('site-b', retry.request_id);
+    assert.deepEqual(await nextActor.work(), frozen, 'Finalized state is immutable');
   } finally {
     await runtime.stop();
     await rm(directory, { recursive: true, force: true });

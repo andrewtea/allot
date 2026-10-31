@@ -6,21 +6,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { RelaycastMessagingClient } from '@agent-relay/sdk/messaging';
+import { investigationRequestSchema, requestSchema as analysisRequestSchema, type ScanResult } from '../study/protocol.ts';
+import { investigate } from './investigation.ts';
 
 const exec = promisify(execFile);
-const requestSchema = z.object({
-  schema_version: z.literal(1),
-  type: z.literal('analyze_site'),
-  message_id: z.uuid(),
-  request_id: z.uuid(),
-  study_id: z.uuid(),
-  site_id: z.string().regex(/^site-[a-z]$/),
-  attempt_id: z.uuid(),
-  payload: z.object({
-    workflow_version: z.literal('mri-integrity-v1'),
-    manifest_sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  }).strict(),
-}).strict();
+const requestSchema = z.union([analysisRequestSchema, investigationRequestSchema]);
 type Request = z.infer<typeof requestSchema>;
 
 export interface SiteConfig {
@@ -32,6 +22,8 @@ export interface SiteConfig {
   projectRoot: string;
   python: string;
   database: string;
+  model?: string;
+  modelApiKey?: string;
 }
 
 /** One supervised consumer per site. SQLite owns intake and the result outbox. */
@@ -112,7 +104,14 @@ export class SiteRunner {
       this.db.prepare('UPDATE jobs SET executions=executions+1 WHERE request_id=?').run(request.request_id);
       let messages: unknown[];
       try {
-        messages = await this.analyze(request);
+        if (request.payload.manifest_sha256 !== this.manifestHash()) throw new Error('INPUT_SNAPSHOT_MISMATCH');
+        if (request.type === 'investigate_finding') {
+          const proposal = await investigate({ original: request.payload.original,
+            manifest: JSON.parse(readFileSync(join(this.config.datasetRoot, 'manifest.json'), 'utf8')),
+            evidenceDir: this.config.evidenceDir, analyze: (id, timeout) => this.analyzeScan(id, timeout),
+            apiKey: this.config.modelApiKey ?? 'edge-injected', model: this.config.model ?? 'gpt-4.1-mini' });
+          messages = [this.response(request, 'finding_proposal', { proposal }, 'proposal')];
+        } else messages = await this.analyze(request);
       } catch {
         // Never forward tool exceptions, stderr, paths, or credentials.
         messages = [this.response(request, 'job_error', { code: 'SITE_ANALYSIS_FAILED' }, 'error')];
@@ -166,14 +165,7 @@ export class SiteRunner {
     const messages: unknown[] = [];
     for (const acquisition of selected) {
       const started = performance.now();
-      const { stdout } = await exec(this.config.python, [
-        '-m', 'analysis.integrity',
-        '--dataset-root', this.config.datasetRoot,
-        '--manifest', join(this.config.datasetRoot, 'manifest.json'),
-        '--acquisition-id', acquisition.acquisition_id,
-        '--evidence-dir', this.config.evidenceDir,
-      ], { cwd: this.config.projectRoot, timeout: 120_000, maxBuffer: 64 * 1024 });
-      const result = JSON.parse(stdout);
+      const result = await this.analyzeScan(acquisition.acquisition_id);
       if (result.input_sha256 !== acquisition.sha256 || result.acquisition_id !== acquisition.acquisition_id) {
         throw new Error('RESULT_IDENTITY_MISMATCH');
       }
@@ -181,5 +173,13 @@ export class SiteRunner {
     }
     messages.push(this.response(request, 'site_finished', { selected_count: selected.length }, 'finished'));
     return messages;
+  }
+
+  private async analyzeScan(acquisitionId: string, timeout = 120_000): Promise<ScanResult> {
+    const { stdout } = await exec(this.config.python, ['-m', 'analysis.integrity',
+      '--dataset-root', this.config.datasetRoot, '--manifest', join(this.config.datasetRoot, 'manifest.json'),
+      '--acquisition-id', acquisitionId, '--evidence-dir', this.config.evidenceDir,
+    ], { cwd: this.config.projectRoot, timeout, maxBuffer: 64 * 1024 });
+    return JSON.parse(stdout);
   }
 }

@@ -86,9 +86,25 @@ export const resultSchema = z.object({
   .refine(r => Object.keys(r.measurements).length > 0 ||
     (r.evidence.status === 'unrenderable' && r.evidence.error !== 'NO_FINITE_VALUES'), 'Measurements required');
 export type ScanResult = z.infer<typeof resultSchema>;
+export const investigationRequestSchema = z.object({
+  schema_version: z.literal(1), type: z.literal('investigate_finding'),
+  message_id: z.uuid(), request_id: z.uuid(), study_id: z.uuid(), site_id: siteId, attempt_id: z.uuid(),
+  payload: z.object({ workflow_version: z.literal('mri-integrity-v1'), manifest_sha256: hash,
+    original: resultSchema }).strict(),
+}).strict();
+export type InvestigationRequest = z.infer<typeof investigationRequestSchema>;
+export const proposalSchema = z.object({
+  action: z.enum(['replace', 'exclude']), reason: z.string().trim().min(1).max(2000),
+  candidate: resultSchema.nullable(),
+  model: z.string().min(1).max(100), tool_calls: z.number().int().min(1).max(10),
+  trace: z.array(z.object({ tool: z.enum(['analyze_scan', 'list_alternates', 'compare_acquisitions', 'get_evidence']),
+    arguments: z.record(z.string(), z.string().max(100)), output: z.unknown() }).strict()).min(1).max(10),
+}).strict().refine(p => (p.action === 'replace') === (p.candidate !== null));
+export type Proposal = z.infer<typeof proposalSchema>;
 const envelope = { schema_version: z.literal(1), message_id: z.string().min(1).max(160),
   request_id: z.uuid(), study_id: z.uuid(), site_id: siteId, attempt_id: z.uuid() };
 export const eventSchema = z.discriminatedUnion('type', [
+  z.object({ ...envelope, type: z.literal('finding_proposal'), payload: z.object({ proposal: proposalSchema }).strict() }).strict(),
   z.object({ ...envelope, type: z.literal('scan_result'), payload: z.object({ result: resultSchema, elapsed_ms: z.number().nonnegative().max(120000) }).strict() }).strict(),
   z.object({ ...envelope, type: z.literal('site_finished'), payload: z.object({ selected_count: z.number().int().min(1).max(6) }).strict() }).strict(),
   z.object({ ...envelope, type: z.literal('job_error'), payload: z.object({ code: z.literal('SITE_ANALYSIS_FAILED') }).strict() }).strict(),

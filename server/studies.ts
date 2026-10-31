@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { studyInputSchema } from '../study/protocol.ts';
 import type { Study } from '../study/state.ts';
+import { inclusion } from '../study/state.ts';
 import { actors } from './generated/index.js';
 import type { Coordinator } from './coordinator.ts';
 
@@ -28,9 +29,13 @@ export function studyView(study: Study) {
     id: study.input.study_id, title: study.input.title, revision: study.revision,
     created_at: study.created_at, lifecycle: study.lifecycle,
     workflow: 'mri-integrity-v1',
+    inclusion: inclusion(study), decisions: study.decisions ?? {}, finalized_at: study.finalized_at,
+    investigations: Object.fromEntries(Object.entries(study.investigations ?? {}).map(([key, j]) => [key,
+      { state: j.state, error: j.error, proposal: j.proposal }])),
     sites: study.input.sites.map(site => ({
       id: site.site_id, selected: site.selected,
-      state: study.sites[site.site_id]?.state ?? 'queued',
+      state: Object.values(study.investigations ?? {}).some(j => j.request.site_id === site.site_id && j.state === 'investigating')
+        ? 'investigating' : study.sites[site.site_id]?.state ?? 'queued',
       error: study.sites[site.site_id]?.error ?? null,
       results: Object.values(study.sites[site.site_id]?.results ?? {}),
     })),

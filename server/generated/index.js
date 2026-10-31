@@ -48,7 +48,11 @@ export const actors = {
                 actorId,
                 [
                     { name: "accept", result: "value" },
+                    { name: "decide", result: "value" },
+                    { name: "finalize", result: "value" },
                     { name: "initialize", result: "value" },
+                    { name: "investigate", result: "value" },
+                    { name: "markInvestigationSent", result: "void" },
                     { name: "markSent", result: "void" },
                     { name: "retrySite", result: "value" },
                     { name: "start", result: "value" },

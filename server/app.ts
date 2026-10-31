@@ -7,10 +7,13 @@ import type { Study } from '../study/state.ts';
 import type { Coordinator } from './coordinator.ts';
 import { studyActor, studyView, type BrowserConfig } from './studies.ts';
 import { authenticated, sameSecret, sessionCookie, sessionToken } from './session.ts';
+import { markdownReport, reportSnapshot } from './report.ts';
 
 const commandSchema = z.object({ commandId: z.uuid(), revision: z.number().int().nonnegative() }).strict();
 const createSchema = z.object({ id: z.uuid(), title: z.string().trim().min(1).max(160) }).strict();
 const titleSchema = commandSchema.extend({ title: createSchema.shape.title });
+const decisionSchema = commandSchema.extend({ findingId: z.string().max(180), action: z.enum(['replace', 'exclude']),
+  reason: z.string().trim().min(1).max(2000), candidateId: z.string().nullable() });
 class HttpError extends Error {
   readonly status: number;
   readonly code: string;
@@ -100,6 +103,14 @@ export function createAppServer(options?: AppOptions) {
         const study = await actor.work() as Study | null;
         if (!study || study.input.owner_id !== 'researcher') throw new HttpError(404, 'NOT_FOUND');
         if (!action && request.method === 'GET') { send(response, 200, studyView(study)); return; }
+        if ((action === 'export.json' || action === 'export.md') && request.method === 'GET') {
+          if (study.lifecycle !== 'finalized') throw new HttpError(409, 'NOT_FINALIZED');
+          const markdown = action === 'export.md';
+          const text = markdown ? markdownReport(study) : JSON.stringify(reportSnapshot(study), null, 2);
+          response.writeHead(200, { 'Content-Type': markdown ? 'text/markdown; charset=utf-8' : 'application/json',
+            'Content-Disposition': `attachment; filename="allot-${id}.${markdown ? 'md' : 'json'}"` });
+          response.end(text); return;
+        }
         if (action?.startsWith('evidence/') && request.method === 'GET') {
           const artifact = action.slice(9);
           if (!hash.safeParse(artifact).success || !Object.hasOwn(study.evidence, artifact)) throw new HttpError(404, 'NOT_FOUND');
@@ -109,6 +120,11 @@ export function createAppServer(options?: AppOptions) {
         }
         if (request.method !== 'POST') throw new HttpError(405, 'METHOD_NOT_ALLOWED');
         const raw = await jsonBody(request);
+        if (action === 'decide') {
+          const body = decisionSchema.parse(raw);
+          const result = await actor.decide(body.commandId, body.findingId, body.action, body.reason, body.candidateId, body.revision);
+          send(response, result.ok ? 200 : 409, result); return;
+        }
         if (action === 'title') {
           const body = titleSchema.parse(raw);
           const result = await actor.updateTitle(body.commandId, body.title, body.revision);
@@ -117,6 +133,8 @@ export function createAppServer(options?: AppOptions) {
         const body = commandSchema.parse(raw);
         const retry = /^sites\/(site-[a-z])\/retry$/.exec(action ?? '');
         const result = action === 'start' ? await coordinator.start(id, body.commandId, body.revision)
+          : action === 'investigate' ? await coordinator.investigate(id, body.commandId, body.revision)
+          : action === 'finalize' ? await actor.finalize(body.commandId, body.revision)
           : retry ? await actor.retrySite(body.commandId, siteId.parse(retry[1]), body.revision) : null;
         if (!result) throw new HttpError(404, 'NOT_FOUND');
         send(response, result.ok ? 200 : 409, result);

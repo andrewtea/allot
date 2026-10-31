@@ -1,4 +1,5 @@
 import { setTimeout } from 'node:timers/promises';
+import { randomUUID } from 'node:crypto';
 import type { RelaycastMessagingClient, InboxItem } from '@agent-relay/sdk/messaging';
 import { actors, type ActorRpcTransport } from './generated/index.js';
 import { decodeEvent, studyInputSchema, type StudyInput } from '../study/protocol.ts';
@@ -52,12 +53,32 @@ export class Coordinator {
     return result;
   }
 
+  async investigate(studyId: string, commandId: string, revision: number) {
+    const actor = actors.StudyActor.get(studyId, this.transport);
+    const state = await actor.work() as Study | null;
+    if (state?.commands[commandId]) return actor.investigate(commandId, revision);
+    const registry = actors.DemoRegistryActor.get('demo', this.transport);
+    const held = (await registry.work()).reservation;
+    if (held?.study_id === studyId && held.kind === 'investigation' && state?.lifecycle === 'blocked' &&
+        !Object.values(state.investigations ?? {}).some(j => j.state === 'investigating')) {
+      await registry.releaseReservation(studyId, held.command_id, held.revision);
+    }
+    const reservation = await registry.reserve(studyId, commandId, revision, 'investigation');
+    if (!reservation.ok) return reservation;
+    const outcome = await actor.investigate(commandId, revision);
+    if (!outcome.ok) await registry.releaseReservation(studyId, commandId, revision);
+    return outcome;
+  }
+
   async cycle() {
     const registryActor = actors.DemoRegistryActor.get('demo', this.transport);
     const registry = await registryActor.work();
     const held = registry.reservation;
     // Crash after reservation but before actor start: complete the same command.
-    if (held) await this.#resumeStart(held.study_id, held.command_id, held.revision);
+    if (held) {
+      if (held.kind === 'investigation') await this.investigate(held.study_id, held.command_id, held.revision);
+      else await this.#resumeStart(held.study_id, held.command_id, held.revision);
+    }
     const study = held ? await actors.StudyActor.get(held.study_id, this.transport).work() as Study | null : null;
     const registered = new Set(registry.studies);
     await Promise.all(this.sites.map(async site => {
@@ -86,6 +107,15 @@ export class Coordinator {
           }
         }
       } catch { this.report('COORDINATOR_INBOX_RETRY', site.siteId); }
+      for (const [key, job] of Object.entries(study?.investigations ?? {})) {
+        if (job.request.site_id !== site.siteId || job.state !== 'investigating' || job.deadline <= Date.now() ||
+          (job.sent_at !== null && job.sent_at >= Date.now() - 30_000)) continue;
+        try {
+          await site.ensureReady();
+          await site.relay.messages.direct({ to: site.agentName, text: JSON.stringify(job.request), idempotencyKey: job.request.request_id });
+          await actors.StudyActor.get(study!.input.study_id, this.transport).markInvestigationSent(key, job.request.request_id);
+        } catch { this.report('INVESTIGATION_DISPATCH_RETRY', site.siteId); }
+      }
     }));
     if (held) {
       const current = await actors.StudyActor.get(held.study_id, this.transport).work() as Study | null;
@@ -93,6 +123,15 @@ export class Coordinator {
       // the pool for retry; a stale worker cannot release another study's reservation.
       if (current?.lifecycle === 'needs_review' || current?.lifecycle === 'ready_to_finalize') {
         await registryActor.releaseReservation(held.study_id, held.command_id, held.revision);
+      }
+    }
+    // Review no longer owns the pool. Obtain a fresh reservation before follow-up.
+    // Legacy studies require explicit opt-in; failed investigations need an explicit retry.
+    if (!(await registryActor.work()).reservation) for (const id of registry.studies) {
+      const candidate = await actors.StudyActor.get(id, this.transport).work() as Study | null;
+      if (candidate?.adaptive && candidate.lifecycle === 'needs_review' && Object.values(candidate.sites).some(run =>
+        Object.values(run.results).some(r => !r.checks_passed && !candidate.investigations?.[`${run.site_id}:${r.acquisition_id}`]))) {
+        await this.investigate(id, randomUUID(), candidate.revision); break;
       }
     }
   }
@@ -107,8 +146,10 @@ export class Coordinator {
     const actor = actors.StudyActor.get(event.study_id, this.transport);
     // First ask the actor: replays and stale attempts require no VM access.
     let result = await actor.accept(event, null);
-    if (result === 'EVIDENCE_REQUIRED' && event.type === 'scan_result' && event.payload.result.evidence.status === 'ready') {
-      const bytes = await site.readEvidence(event.payload.result.evidence.artifact_id);
+    const evidence = event.type === 'scan_result' ? event.payload.result.evidence
+      : event.type === 'finding_proposal' ? event.payload.proposal.candidate?.evidence : undefined;
+    if (result === 'EVIDENCE_REQUIRED' && evidence?.status === 'ready') {
+      const bytes = await site.readEvidence(evidence.artifact_id);
       result = await actor.accept(event, Buffer.from(bytes).toString('base64'));
     }
     if (result === 'ACCEPTED' || result === 'DUPLICATE') await site.relay.inbox.ack({ inboxItemId: item.id });

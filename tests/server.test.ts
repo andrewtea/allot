@@ -174,7 +174,10 @@ test('authenticated HTTP study workflow enforces access, revisions, replay and s
     assert.notEqual(retried.sites['site-a'].request.attempt_id, request.attempt_id);
     assert.equal(retried.lifecycle, 'running');
     assert.equal((await call(`${url}/evidence/${'a'.repeat(64)}`)).status, 404);
-    assert.equal((await call(`${url}/finalize`, { commandId: randomUUID(), revision: retried.revision })).status, 404);
+    assert.equal((await call(`${url}/finalize`, { commandId: randomUUID(), revision: retried.revision })).status, 409);
+    assert.equal((await call(`${url}/export.json`)).status, 409);
+    assert.equal((await call(`${url}/decide`, { commandId: randomUUID(), revision: retried.revision,
+      findingId: 'site-a:scan-one', action: 'exclude', reason: ' ', candidateId: null })).status, 400);
     assert.equal((await call('/.local/browser/access.json')).status, 404);
     await call('/api/session', undefined, {}, 'DELETE');
     cookie = '';

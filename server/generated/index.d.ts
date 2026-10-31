@@ -124,9 +124,25 @@ export declare namespace actors {
                 Args: Parameters<Stub["accept"]>
                 Result: Awaited<ReturnType<Stub["accept"]>>
             }
+            ["decide"]: {
+                Args: Parameters<Stub["decide"]>
+                Result: Awaited<ReturnType<Stub["decide"]>>
+            }
+            ["finalize"]: {
+                Args: Parameters<Stub["finalize"]>
+                Result: Awaited<ReturnType<Stub["finalize"]>>
+            }
             ["initialize"]: {
                 Args: Parameters<Stub["initialize"]>
                 Result: Awaited<ReturnType<Stub["initialize"]>>
+            }
+            ["investigate"]: {
+                Args: Parameters<Stub["investigate"]>
+                Result: Awaited<ReturnType<Stub["investigate"]>>
+            }
+            ["markInvestigationSent"]: {
+                Args: Parameters<Stub["markInvestigationSent"]>
+                Result: Awaited<ReturnType<Stub["markInvestigationSent"]>>
             }
             ["markSent"]: {
                 Args: Parameters<Stub["markSent"]>
@@ -161,9 +177,25 @@ export declare namespace actors {
                 type Args = $MethodTypes["accept"]["Args"]
                 type Result = $MethodTypes["accept"]["Result"]
             }
+            namespace decide {
+                type Args = $MethodTypes["decide"]["Args"]
+                type Result = $MethodTypes["decide"]["Result"]
+            }
+            namespace finalize {
+                type Args = $MethodTypes["finalize"]["Args"]
+                type Result = $MethodTypes["finalize"]["Result"]
+            }
             namespace initialize {
                 type Args = $MethodTypes["initialize"]["Args"]
                 type Result = $MethodTypes["initialize"]["Result"]
+            }
+            namespace investigate {
+                type Args = $MethodTypes["investigate"]["Args"]
+                type Result = $MethodTypes["investigate"]["Result"]
+            }
+            namespace markInvestigationSent {
+                type Args = $MethodTypes["markInvestigationSent"]["Args"]
+                type Result = $MethodTypes["markInvestigationSent"]["Result"]
             }
             namespace markSent {
                 type Args = $MethodTypes["markSent"]["Args"]

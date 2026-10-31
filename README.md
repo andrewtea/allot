@@ -8,9 +8,9 @@ runners, Terse study actors, coordinator recovery, and an authenticated browser
 create/run/results/retry screen**. The runner has passed a
 live single-site Freestyle/hosted Relay gate. Actor/coordinator tests run against
 real local Terse. The browser can be hosted on free Render in authentication-only
-mode while cloud study services are unconfigured. A supervised **one-site cloud
+mode while cloud study services are unconfigured. A supervised **three-site cloud
 browser run** has now passed with managed Terse, hosted Relay, and real MRI
-analysis in the existing Freestyle Site B VM. There is no human resolution, final report,
+analysis in three separate Freestyle VMs. There is no human resolution, final report,
 or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
 and [technical spec](MVP_TECHNICAL_SPEC.md).
 
@@ -19,17 +19,30 @@ flat site rows, a split evidence pane, and self-hosted OFL Manrope / DM Sans.
 
 ## Supervised cloud demo
 
-The existing [live study](https://allot-1dzm.onrender.com/studies/e3de79e1-2fb8-4232-830e-9799cdc8c815)
+The existing [live study](https://allot-1dzm.onrender.com/studies/447ead65-2cc4-4fe9-a3a5-443bb15761ae)
 requires the privately supplied researcher credential. On 2026-10-31, browser
-create → run executed Site B's actual Python/SQLite runner over hosted Relay:
-sub-04 passed; synthetic sub-03 flagged internal blank slices 100–102 and the
-additional heuristic interval 248–249. Managed Terse persisted both hash-verified
-PNG previews (183,026 bytes). The site ledger recorded one completed execution
-and three sent outbox events. No raw volumes were retrieved centrally.
+create → run executed all three sites' actual Python/SQLite runners over hosted
+Relay, with a separate VM and Relay workspace per simulated site. Six scans
+returned four passes and two findings: B's synthetic sub-03 blank slices
+100–102 plus heuristic interval 248–249, and C's synthetic sub-05 zero signal.
+Managed Terse revision 10 persisted six hash-verified PNG previews (383,305 bytes).
+Each site's ledger recorded one completed execution and three sent outbox events.
+Reload restored all results; all six preview routes returned 200 with matching
+hashes after the VMs were paused. Earlier one-site studies remain unchanged.
+No raw volumes were retrieved centrally.
 
-This is **one simulated site, not the intended three-site deployment**. The
-existing VM retains its bounded TTL/runtime policies. Free Render can sleep;
-this demonstrates supervised execution, not unattended coordination. Sites are
+Use **New study** to create a six-scan run; an older Draft keeps its original
+immutable site snapshot. Sites A/C were prepared from fresh `freestyle/ubuntu-sm`
+VMs, not cloned from populated B. Each VM has a 24-hour TTL, 30-minute per-run
+cap, and one-hour total runtime budget. Existing B's limits were not extended.
+All were paused after validation; new analysis resumes them. No paid plan was
+upgraded. These limits bound this temporary demo, not indefinite availability.
+Flush guest writes with `sync` before operator pause; fresh guest files were not
+visible through paused filesystem reads until flushed. Inspect VM state after
+filesystem reads rather than assuming a read cannot wake it.
+
+Free Render can sleep; this demonstrates supervised execution, not unattended
+coordination. Sites are
 released automatically after all analysis and required previews finish, allowing
 another study without deleting previous results. Failed runs retain the pool
 for site retry; active runs cannot overlap. Investigation,
@@ -130,8 +143,8 @@ messaging: six scans, four passes, two flagged, six hash-verified PNGs totaling
 and clicking Retry site recovered B without changing A/C results. Reload and
 process restart preserved all six results. Browser checks also cover invalid
 login, Draft editing, running, busy-pool rejection, image retrieval failure,
-disconnection/reconnection, and 390px list/detail layouts. No managed application
-end-to-end run, approval, or final report is claimed.
+disconnection/reconnection, and 390px list/detail layouts. These local checks are
+separate from the supervised cloud run above. No approval or final report is claimed.
 
 ## HTTP bootstrap and free Render
 
@@ -297,8 +310,8 @@ This requires Bun (1.4.2+) as well as Node and the Python test environment.
 This is the create/run/results foundation, not the complete study workflow.
 Investigation, human decisions, and finalization
 still need implementation. Managed authentication and persistence have passed
-for the one-site run above; six-scan managed evidence capacity and full managed
-restart/recovery remain unverified.
+for the three-site run above, including all six persisted previews; full managed
+restart/recovery remains unverified.
 
 ## Coordinator
 

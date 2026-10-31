@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Imaging study architecture reference</title>
+<style>
+body{margin:0;color:var(--foreground,CanvasText);font:13px/20px var(--font-sans,system-ui)}
+*{box-sizing:border-box}p{margin:0}.ui-header{margin-bottom:16px}.ui-title{font-size:13px;font-weight:500;text-wrap:balance}.ui-sub,.sub{font-size:12px;color:var(--muted-foreground,GrayText);text-wrap:pretty}.ui-sub{margin-top:4px}
+.node{padding:10px 12px;border:1px solid var(--border,GrayText);border-radius:6px;min-width:0}.name{font-weight:500}.arrow{padding:5px 0;font-size:11px;color:var(--muted-foreground,GrayText)}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}.sites{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.boundary{padding:10px 12px;border:1px dashed var(--border,GrayText);border-radius:6px}.boundary-label{font-size:11px;color:var(--muted-foreground,GrayText);margin-bottom:4px}
+.node,.pair,.sites{width:calc(100% - 2px)}
+.rule{margin-top:12px;padding-top:10px;border-top:1px solid var(--border,GrayText)}.accent{color:var(--chart-1,LinkText)}.flow{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:6px;font-size:12px}.foot{font-size:11px;color:var(--muted-foreground,GrayText);margin-top:8px}
+@media(max-width:559px){.pair{grid-template-columns:1fr;gap:8px}.sites{gap:6px}.node{padding:7px 10px}.boundary{padding:8px 10px}.sub{line-height:17px}.arrow,.foot{line-height:16px}}
+</style>
+<div class="ui-header">
+  <p class="ui-title">Study state is shared; raw scans stay at each site</p>
+  <p class="ui-sub">Proposed MVP · Simulated institutions, public images.</p>
+</div>
+<div class="node"><p class="name">Researcher / viewer browser</p><p class="sub">Researcher decides; viewer watches read-only.</p></div>
+<p class="arrow">↓ HTTPS to backend · ↑ authorized actor WebSocket</p>
+<div class="pair">
+  <div class="boundary"><p class="boundary-label">Application host · not a site VM</p><p class="name">Backend + coordinator worker</p><p class="sub">User access, dispatch, validation, preview retrieval.</p></div>
+  <div class="boundary"><p class="boundary-label">Managed Terse</p><p class="name accent">StudyActor + demo registry</p><p class="sub">Jobs, findings, approvals, evidence, final report.</p></div>
+</div>
+<p class="arrow">Backend / worker ↔ actor: commands, outbox, events</p>
+<div class="node"><p class="name">Agent Relay</p><p class="sub">Coordinator ↔ site agent messages.</p></div>
+<p class="arrow">↓ analysis / follow-up requests · ↑ results / proposals</p>
+<div class="sites">
+  <div class="boundary"><p class="name">Site A</p><p class="sub">Freestyle VM</p></div>
+  <div class="boundary"><p class="name">Site B</p><p class="sub">Freestyle VM</p></div>
+  <div class="boundary"><p class="name">Site C</p><p class="sub">Freestyle VM</p></div>
+</div>
+<p class="sub" style="margin-top:6px">Each VM: site agent, Python tools, local scans and job ledger. Image tools run here, not in actors.</p>
+<div class="rule"><p class="name">Separate evidence path</p><p class="sub">Approved montage → backend via file API → actor → browser / report. Raw volumes stay local.</p></div>
+<div class="rule"><p class="name">One study, end to end</p><div class="flow"><span>Create</span><span>→ Analyze</span><span>→ Investigate</span><span>→ Human approval</span><span>→ Finalize / export</span></div></div>
+<p class="foot">No Supabase or self-hosting. Derived previews may leave sites; this is not a privacy guarantee. Integrations still require validation.</p>
+</html>

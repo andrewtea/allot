@@ -10,12 +10,78 @@ live single-site Freestyle/hosted Relay gate. Actor/coordinator tests run agains
 real local Terse. The browser can be hosted on free Render in authentication-only
 mode while cloud study services are unconfigured. A supervised **three-site cloud
 browser run** has now passed with managed Terse, hosted Relay, and real MRI
-analysis in three separate Freestyle VMs. There is no human resolution, final report,
-or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
+analysis in three separate Freestyle VMs. Bounded model investigation, researcher
+replacement/exclusion decisions, and frozen Markdown/JSON exports are implemented.
+Contracts: [user spec](MVP_USER_SPEC.md)
 and [technical spec](MVP_TECHNICAL_SPEC.md).
 
 The browser follows the [frontend design direction](docs/frontend-design.md):
 flat site rows, a split evidence pane, and self-hosted OFL Manrope / DM Sans.
+
+## Investigation, resolution, and report
+
+New studies automatically investigate flagged originals after obtaining a fresh
+pool reservation. Legacy result-only studies require **Investigate findings**;
+deploying does not automatically spend their VM/model budgets. The real site model
+chooses among `list_alternates`, `compare_acquisitions`, `analyze_scan`, and
+`get_evidence`. Each investigation is bounded to ten tools, eight model requests,
+1,800 output tokens per request, and two minutes. Only passing, compatible,
+hash-verified alternatives can be proposed. Tool/model failure produces an error,
+not a fallback proposal; **Retry investigation** creates a fresh attempt.
+
+Suggestions do not change inclusion. Review original/retest evidence, edit the
+required reason, and click **Approve replacement** or **Exclude subject**. Taking
+no action leaves the finding unresolved. Decisions use revision checks and stable
+command IDs. **Finalize report** freezes a fully resolved study with at least one
+included subject and persisted evidence. **Download Markdown / JSON** include
+original results, replacement analysis, human reasons, provenance, synthetic
+disclosures, per-site counts, and all accepted embedded PNGs.
+
+### Verified live completion
+
+The [finalized cloud study](https://allot-1dzm.onrender.com/studies/6270ea4d-1a0c-4433-8a0e-1bc4a287c146)
+completed at revision 16 on 2026-10-31. Render runtime `6657de7` (deployment
+`dep-dbj6v9mtlv9c73cd8c00`) uses the updated managed actors and actual site runners.
+B's model called list → compare → analyze and proposed its actual passing retest;
+C's model called list and proposed exclusion from an empty alternate search.
+Both proposals remained unresolved until explicit researcher-session UI actions.
+The resulting report has **six selected, five included, one excluded and one
+replacement**, retaining all six original results and seven hash-verified PNGs
+totaling **445,460 bytes**. Markdown/JSON exports returned 200 and contained all
+seven embedded previews. Three attempted finalized mutations returned 409.
+
+Each site ledger recorded one completed analysis execution; B/C additionally
+recorded one completed investigation execution. All 3/4/4 outbox events were sent.
+After an empty-reservation check and `sync`, all three VMs were paused. Exports
+remained byte-identical and all seven authenticated PNG routes still matched
+their hashes. Earlier studies `447ead65…` and `8e2d16f5…` remain unchanged at
+revision 10 with six previews each.
+
+**Budget warning:** after pausing, total runtime was A 1,918 / B 3,347 / C 1,921
+seconds against unchanged 3,600-second lifetime caps. B has only **253 seconds**
+remaining. Use the finalized report for a durable demo; a new run automatically
+resumes VMs and consumes their remaining budget. No caps, paid plans or VM counts
+were increased. Free Render can still sleep after 15 idle minutes.
+
+Local validation used real OpenAI `gpt-4.1-mini-2025-04-14`, Python/SQLite/Terse,
+and explicitly in-memory messaging: B discovered/analyzed its actual retest;
+C's empty alternate search proposed exclusion. Removing B's alternate from a
+separate tool context changed its real model proposal to exclusion. Browser
+approvals/finalization produced six selected, five included, one excluded, one
+replacement, six retained originals and seven embedded PNGs. Both exports and
+counts survived a full local process restart. This is distinct from cloud E2E.
+
+Existing B/C Freestyle model gates passed HTTP 200 with placeholder guest keys;
+the edge injects the provider key only for `POST /v1/responses`, fixes the model
+to `gpt-4.1-mini`, caps output at 1,800 tokens, and sets `store:false`. Unmatched
+`GET /v1/models` returned 401 at both sites. Node trusts the system CA bundle;
+certificate verification remains enabled. No provider key is stored in a guest
+or snapshot. Local development uses the orb's `OPENAI_API_KEY` directly; without
+one investigations fail explicitly, rather than using a canned agent.
+
+Deferred: viewer capabilities/live consoles, direct managed subscriptions,
+independent preview generation retry, cross-attempt tool caching, full managed
+restart/failure recovery proof, and unattended coordination on sleeping Render.
 
 ## Supervised cloud demo
 
@@ -45,8 +111,9 @@ Free Render can sleep; this demonstrates supervised execution, not unattended
 coordination. Sites are
 released automatically after all analysis and required previews finish, allowing
 another study without deleting previous results. Failed runs retain the pool
-for site retry; active runs cannot overlap. Investigation,
-approvals, collaboration, and reports are still unavailable.
+for site retry; active runs cannot overlap. Follow-up investigation obtains its
+own fresh reservation; completed review does not retain the VMs. Collaboration
+and viewer capabilities remain deferred.
 
 ## Local development
 
@@ -92,8 +159,7 @@ network-failed command can be retried with its original ID. Site errors offer
 **Retry site**; completed sites remain intact. **Reload preview** only retries
 HTTP retrieval of already-persisted evidence, not image analysis.
 
-This phase intentionally stops at results. There are no LLM investigations,
-approvals, viewer links, finalization, or exports. A missing generated preview
+Viewer links remain deferred. A missing generated preview
 currently requires retrying its site's analysis; independent **Retry preview**
 and direct managed WebSocket subscriptions are deferred. This is not full U4/U6
 acceptance. The registry reserves the pool during analysis and failed-site
@@ -131,7 +197,10 @@ Enabling shared cloud infrastructure requires separate approval.
 HTTP routes are `POST/GET/DELETE /api/session`, `POST /api/studies`,
 `GET /api/studies/:id`, `POST /api/studies/:id/title`,
 `POST /api/studies/:id/start`, `POST /api/studies/:id/sites/:site/retry`, and
-`GET /api/studies/:id/evidence/:sha256`. Writes require the configured Origin and
+`GET /api/studies/:id/evidence/:sha256`. Follow-up routes are
+`POST /api/studies/:id/investigate`, `POST /api/studies/:id/decide`,
+`POST /api/studies/:id/finalize`, and finalized-only `GET /api/studies/:id/export.md`
+or `export.json`. Writes require the configured Origin and
 JSON; every study/evidence request requires a signed 12-hour HttpOnly session.
 Actor jobs, provider keys, and raw volumes are never returned to the browser.
 There is no viewer capability endpoint yet. Login throttling is process-local
@@ -144,7 +213,8 @@ and clicking Retry site recovered B without changing A/C results. Reload and
 process restart preserved all six results. Browser checks also cover invalid
 login, Draft editing, running, busy-pool rejection, image retrieval failure,
 disconnection/reconnection, and 390px list/detail layouts. These local checks are
-separate from the supervised cloud run above. No approval or final report is claimed.
+separate from the supervised cloud run above; the later investigation validation
+is documented separately above.
 
 ## HTTP bootstrap and free Render
 
@@ -227,8 +297,8 @@ License, authors, source version, source hash, and transformations accompany res
 
 All seven unmodified source acquisitions pass the implemented checks. The
 synthetic B and C scans produce blank-slab and degenerate-signal findings,
-respectively. The B alternate passes. This validates the fixture, not the
-unimplemented approval workflow or final inclusion counts.
+respectively. The B alternate passes. Fixture validation alone is not evidence
+of the approval workflow; the separate end-to-end validation is documented above.
 
 **Heuristic limitation:** blanking B's slab changes the global percentile window;
 the detector also flags marginal low-occupancy slices 248–249. Those findings
@@ -250,12 +320,12 @@ workspace admin key and all provider keys outside the VM. Run one consumer per
 site; `site/allot-site.service` gives the tested Ubuntu installation paths.
 Keep the manifest and inputs immutable during a study.
 
-The runner accepts bounded `analyze_site` requests, commits intake to SQLite
+The runner accepts bounded `analyze_site` and `investigate_finding` requests, commits intake to SQLite
 before ACK, and commits results plus a retryable outbox atomically. It rejects
 conflicting request IDs and non-allowlisted senders. Completed commands are not
 rerun; interrupted, uncommitted analysis can run again. This is not an
 exactly-once execution guarantee. Study actors now provide stale-attempt
-arbitration and reservations; tool caching and investigation remain unimplemented.
+arbitration and reservations. Cross-attempt tool caching remains deferred.
 
 `node scripts/check-site-integration.ts <private-config.json>` reruns the live
 gate against **existing disposable resources**. It starts/stops the service,
@@ -307,9 +377,8 @@ authenticated local Terse runtimes and verifies persisted evidence after a full
 runtime restart, reservations, retries, replay, and read-only WebSocket grants.
 This requires Bun (1.4.2+) as well as Node and the Python test environment.
 
-This is the create/run/results foundation, not the complete study workflow.
-Investigation, human decisions, and finalization
-still need implementation. Managed authentication and persistence have passed
+This implements the core study workflow, not all MVP collaboration/recovery gates.
+Managed authentication and persistence have passed
 for the three-site run above, including all six persisted previews; full managed
 restart/recovery remains unverified.
 

@@ -86,8 +86,8 @@ assert.equal(initial.metadata?.purpose, 'integration-gate', 'Refuse to modify a 
 record('starting-state', { vmId: config.vmId, state: initial.state, resources: initial.resources });
 await vm.start();
 try {
-  await command(`systemctl stop allot-site 2>/dev/null || true; mkdir -p ${root}/state`);
-  for (const file of ['site/runner.ts', 'site/main.ts', 'site/allot-site.service', 'analysis/integrity.py']) {
+  await command(`systemctl stop allot-site 2>/dev/null || true; mkdir -p ${root}/state ${root}/study`);
+  for (const file of ['site/runner.ts', 'site/investigation.ts', 'study/protocol.ts', 'site/main.ts', 'site/allot-site.service', 'analysis/integrity.py']) {
     await vm.fs.writeFile(`${root}/${file}`, await readFile(file));
   }
   const siteConfig = {

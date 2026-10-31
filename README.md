@@ -3,11 +3,12 @@
 Image-backed integrity review across simulated research sites. Public research
 data only; not for clinical use.
 
-The first implementation is the **site-local analysis pipeline, reproducible MRI
-fixture, and durable Relay runner**. The runner has passed a live single-site
-Freestyle/hosted Relay gate, including crash recovery. A minimal HTTP server is
-ready for a free Render bootstrap deployment. There is no application UI,
-actor workflow, or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
+Implemented: **site-local analysis, reproducible MRI fixtures, durable Relay
+runners, Terse study actors, and coordinator recovery**. The runner has passed a
+live single-site Freestyle/hosted Relay gate. Actor/coordinator tests run against
+real local Terse. The minimal HTTP bootstrap is live on free Render; the new
+study backend is not deployed. There is no application UI, researcher sign-in,
+human resolution, or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
 and [technical spec](MVP_TECHNICAL_SPEC.md).
 
 The [frontend design direction](docs/frontend-design.md) records the preferred
@@ -183,3 +184,40 @@ This is the create/run/results foundation, not the complete study workflow.
 Investigation, human decisions, finalization/releasing the active reservation,
 and the UI still need implementation. Managed Terse deployment, actor capacity,
 and managed authentication/persistence remain explicit deployment gates.
+
+## Coordinator
+
+`server/coordinator.ts` exposes backend-only create/start operations and a
+recoverable dispatch/intake loop. The registry reserves the demo pool before
+start; a new coordinator finishes interrupted starts and resends stable requests.
+Each site's Relay client validates the authenticated sender and site assignment.
+Results are ACKed only after actor persistence; malformed/stale events are
+terminally rejected through Relay. Transient processing errors are deferred and
+retried. Duplicate results do not require the VM to remain available. A failed
+site connection does not prevent another site's intake.
+
+`npm start` opts into the coordinator only when `COORDINATOR_CONFIG` names a
+private JSON file. Its `sites` array requires `siteId`, `vmId`, `agentId`,
+`agentName`, `relayBaseUrl`, and `relayAgentToken` per site. The token is the
+**coordinator identity's token in that site's workspace**, not the site's token
+or a workspace admin key. Bind each token to its known HTTPS Relay origin.
+Prefer separate workspaces for cross-site confidentiality. Also configure
+server-only `TERSE_ACTOR_URL`, `TERSE_API_KEY`, and `FREESTYLE_API_KEY`.
+
+Enabling this configuration permits the coordinator to resume the configured
+VMs, check their existing `allot-site` systemd services, send analysis requests,
+and read bounded PNGs only under `/srv/allot/data/evidence/<sha256>.png`.
+It does not provision VMs, install runners, or deploy actors. Keep configuration
+out of Git and obtain operational authorization before enabling it on shared
+infrastructure. The credential-free HTTP bootstrap and its routes remain
+unchanged when configuration is absent. SIGTERM stops polling and gives active
+work up to ten seconds; unacknowledged work recovers after restart.
+
+Validation on 2026-10-31: the six public-fixture scans traversed the coordinator,
+real Python/SQLite runners, and real local Terse in **12.69 seconds**, producing
+four passes, two flagged acquisitions, and six persisted previews totaling
+**383,305 bytes**. Site A completed; B and C require review. This used in-memory
+messaging, not a new cloud end-to-end run. Automated failure injection covers
+lost send confirmations, lost ACKs, an unavailable peer workspace, missing
+evidence recovery, and 205 duplicate deliveries. A separate real five-minute
+alarm check transitioned a stalled site to `NO_PROGRESS_TIMEOUT` / `blocked`.

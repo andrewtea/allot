@@ -5,7 +5,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startLocalActors } from 'terse-sdk/dev';
+import { RelaycastMessagingClient, type InboxItem } from '@agent-relay/sdk/messaging';
 import { actors, createActorTransport } from '../server/generated/index.js';
+import { Coordinator, type SiteConnection } from '../server/coordinator.ts';
 import { studyInputSchema, type StudyInput, type ScanResult } from '../study/protocol.ts';
 import type { Study } from '../study/state.ts';
 
@@ -128,6 +130,106 @@ test('real Terse actors preserve reservations, accepted evidence and retry arbit
   } finally {
     if (previousUrl === undefined) delete process.env.TERSE_ACTOR_URL; else process.env.TERSE_ACTOR_URL = previousUrl;
     if (previousKey === undefined) delete process.env.TERSE_API_KEY; else process.env.TERSE_API_KEY = previousKey;
+    await runtime.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('coordinator resumes durable intent and ACKs only persisted results across delivery failures', { timeout: 120_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'allot-coordinator-'));
+  const runtime = await startLocalActors({ project: process.cwd(), entrypoint: 'src/actor.ts', dataDir: directory, quiet: true });
+  const transport = createActorTransport({ projectId: runtime.connection.projectId, controlPlaneUrl: runtime.connection.controlPlaneUrl });
+  try {
+    const data = input();
+    const actor = actors.StudyActor.get(data.study_id, transport);
+    const snapshot = async () => await actor.work() as Study;
+    let inbox: InboxItem[] = [];
+    const enqueue = (body: unknown, from = 'trusted-site') => inbox.push({ id: randomUUID(), recipient: { name: 'coordinator' },
+      state: 'queued', attempts: 0, message: { id: randomUUID(), messageId: randomUUID(), text: JSON.stringify(body), from: { id: from } } });
+    const relay = new RelaycastMessagingClient({ agentToken: 'test-only', baseUrl: 'https://example.invalid' });
+    const sent: string[] = [];
+    let loseConfirmation = true;
+    relay.messages.direct = async message => {
+      sent.push(message.text);
+      if (loseConfirmation) throw new Error('Lost send confirmation');
+      return { id: message.idempotencyKey!, messageId: message.idempotencyKey!, text: message.text, from: { id: 'coordinator' } };
+    };
+    relay.inbox.list = async () => ({ items: inbox.slice(0, 100) });
+    const rejected: string[] = [];
+    relay.inbox.fail = async ({ inboxItemId, error }) => {
+      rejected.push(error); inbox = inbox.filter(item => item.id !== inboxItemId);
+      return { supported: true, action: 'fail', deliveryId: inboxItemId, messageId: inboxItemId, state: 'failed' };
+    };
+    // Deterministic transport failure injection, not a claim about live Relay.
+    relay.inbox.defer = async () => { throw new Error('Connection lost'); };
+    let loseAck = true;
+    relay.inbox.ack = async ({ inboxItemId }) => {
+      const event = JSON.parse(inbox.find(item => item.id === inboxItemId)!.message.text);
+      assert((await snapshot()).seen[event.message_id], 'ACK must follow actor commit');
+      if (loseAck) throw new Error('Lost ACK');
+      inbox = inbox.filter(item => item.id !== inboxItemId);
+      return { supported: true, action: 'ack', deliveryId: inboxItemId, messageId: inboxItemId, state: 'read' };
+    };
+    let evidenceAvailable = true;
+    const site: SiteConnection = { siteId: 'site-b', agentId: 'trusted-site', agentName: 'site-b', relay,
+      ensureReady: async () => {}, readEvidence: async id => {
+        assert.equal(id, artifact);
+        if (!evidenceAvailable) throw new Error('VM unavailable');
+        return Buffer.from(png, 'base64');
+      } };
+    const offlineRelay = new RelaycastMessagingClient({ agentToken: 'test-only', baseUrl: 'https://example.invalid' });
+    offlineRelay.inbox.list = async () => { throw new Error('Other workspace unavailable'); };
+    const sites = [site, { ...site, siteId: 'site-c', relay: offlineRelay }];
+    const logs: string[] = [];
+    const coordinator = () => new Coordinator(sites, transport, code => logs.push(code));
+    let worker = coordinator();
+    assert.equal((await worker.create(data)).ok, true);
+    assert.equal((await worker.start(data.study_id, randomUUID(), 99)).code, 'CONFLICT');
+    const registry = actors.DemoRegistryActor.get('demo', transport);
+    assert.equal((await registry.work()).reservation, null, 'Rejected start must release reservation');
+    const command = randomUUID();
+    await registry.reserve(data.study_id, command, 0); // Crash boundary before StudyActor.start.
+    await worker.cycle();
+    assert.equal((await snapshot()).lifecycle, 'running');
+    assert.equal((await snapshot()).sites['site-b'].sent_at, null);
+    loseConfirmation = false;
+    worker = coordinator();
+    await worker.cycle();
+    assert.equal(sent.length, 2);
+    assert.equal(sent[0], sent[1], 'A restart must resend the same request/attempt');
+    assert((await snapshot()).sites['site-b'].sent_at);
+    const request = JSON.parse(sent[0]);
+    const event = (type: string, suffix: string, payload: unknown) => ({ ...request, type, message_id: `${request.request_id}:${suffix}`, payload });
+    const first = event('scan_result', 'scan-one', { result: result('scan-one', 'subject-one'), elapsed_ms: 3 });
+    enqueue(first, 'impostor');
+    enqueue({ ...first, site_id: 'site-a' });
+    enqueue({ invalid: 'x'.repeat(70_000) });
+    enqueue(first);
+    await worker.cycle();
+    assert.deepEqual(rejected, ['UNAUTHORIZED_SENDER', 'WRONG_DESTINATION', 'INVALID_EVENT']);
+    assert.equal(inbox.length, 1);
+    assert.equal((await snapshot()).evidence[artifact], png);
+    evidenceAvailable = false;
+    loseAck = false;
+    worker = coordinator();
+    const revision = (await snapshot()).revision;
+    await worker.cycle();
+    assert.equal(inbox.length, 0, 'Persisted duplicate must ACK even with VM offline');
+    assert.equal((await snapshot()).revision, revision);
+    enqueue(event('site_finished', 'finished', { selected_count: 2 }));
+    enqueue(event('scan_result', 'scan-two', { result: result('scan-two', 'subject-two'), elapsed_ms: 5 }));
+    await worker.cycle();
+    assert.equal((await snapshot()).lifecycle, 'running');
+    assert.equal(inbox.length, 1, 'Transient evidence failure must remain retryable');
+    evidenceAvailable = true;
+    await worker.cycle();
+    assert.equal((await snapshot()).lifecycle, 'ready_to_finalize');
+    for (let i = 0; i < 205; i++) enqueue(first);
+    await worker.cycle(); await worker.cycle(); await worker.cycle();
+    assert.equal(inbox.length, 0, 'Drain all pages after restart');
+    assert.equal(Object.keys((await snapshot()).sites['site-b'].results).length, 2);
+    assert(logs.includes('COORDINATOR_INBOX_RETRY'), 'Other site outage was exercised');
+  } finally {
     await runtime.stop();
     await rm(directory, { recursive: true, force: true });
   }

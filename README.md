@@ -10,6 +10,10 @@ ready for a free Render bootstrap deployment. There is no application UI,
 actor workflow, or LLM investigation yet. Contracts: [user spec](MVP_USER_SPEC.md)
 and [technical spec](MVP_TECHNICAL_SPEC.md).
 
+The [frontend design direction](docs/frontend-design.md) records the preferred
+visual reference, layout rules, proposed tokens, and researched font options;
+it is not an implemented UI.
+
 ## Local development
 
 Use Python 3.11+, [uv](https://docs.astral.sh/uv/), and Node 22.18+. These commands

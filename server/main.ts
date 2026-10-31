@@ -1,5 +1,6 @@
 import { createAppServer } from './app.ts';
 import { configuredCoordinator } from './coordinator-config.ts';
+import { browserConfig } from './studies.ts';
 
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -7,9 +8,11 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 const coordinator = configuredCoordinator();
+const config = browserConfig();
+if (config && !coordinator) throw new Error('BROWSER_REQUIRES_COORDINATOR');
 const stopping = new AbortController();
 let worker: Promise<void> = Promise.resolve();
-const server = createAppServer();
+const server = createAppServer(config && coordinator ? { config, coordinator } : undefined);
 server.on('error', () => {
   console.error(JSON.stringify({ code: 'HTTP_SERVER_ERROR' }));
   process.exitCode = 1;

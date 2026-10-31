@@ -33,6 +33,7 @@ interface $StudyActorContract {
         markSent(siteId: string, requestId: string): Promise<void>
         retrySite(commandId: string, siteId: string, revision: number): Promise<Outcome>
         start(commandId: string, revision: number): Promise<Outcome>
+        updateTitle(commandId: string, title: string, revision: number): Promise<Outcome>
         /** Backend-only state, including durable jobs. No provider secrets are stored. */
         work(): Promise<unknown>
     }

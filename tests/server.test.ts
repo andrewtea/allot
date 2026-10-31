@@ -3,6 +3,17 @@ import { test } from 'node:test';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { createAppServer } from '../server/app.ts';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { startLocalActors } from 'terse-sdk/dev';
+import { actors, createActorTransport } from '../server/generated/index.js';
+import { Coordinator } from '../server/coordinator.ts';
+import { sessionToken } from '../server/session.ts';
+import type { BrowserConfig, StudyView } from '../server/studies.ts';
+import type { Study } from '../study/state.ts';
+import type { SiteConnection } from '../server/coordinator.ts';
 
 test('bootstrap HTTP contract exposes liveness, not application readiness', async () => {
   const server = createAppServer();
@@ -38,5 +49,94 @@ test('bootstrap HTTP contract exposes liveness, not application readiness', asyn
     }
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('authenticated HTTP study workflow enforces access, revisions, replay and site retries on real Terse', { timeout: 120_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'allot-http-'));
+  const runtime = await startLocalActors({ project: process.cwd(), entrypoint: 'src/actor.ts', dataDir: directory,
+    apiKey: 'local-http-test', quiet: true });
+  const transport = createActorTransport({ projectId: runtime.connection.projectId,
+    controlPlaneUrl: runtime.connection.controlPlaneUrl, apiKey: runtime.connection.apiKey });
+  // This test exercises HTTP and actors, not messaging/provider connections.
+  const coordinator = new Coordinator([{ siteId: 'site-a' } as SiteConnection], transport);
+  const config: BrowserConfig = { origin: 'https://allot.example', credential: 'test-credential-not-for-deployment',
+    sessionSecret: 'test-session-signing-material-not-for-deployment', sites: [{ site_id: 'site-a',
+      manifest_sha256: 'a'.repeat(64), selected: [{ subject_id: 'subject-one', acquisition_id: 'scan-one',
+        input_sha256: 'b'.repeat(64), source_sha256: 'c'.repeat(64) }] }] };
+  const server = createAppServer({ coordinator, config });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  let cookie = '';
+  const call = (path: string, body?: unknown, headers = {}, method = body === undefined ? 'GET' : 'POST') => fetch(`${base}${path}`, {
+    method, headers: { 'Content-Type': 'application/json', Origin: config.origin, Cookie: cookie, ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  try {
+    const id = randomUUID();
+    const url = `/api/studies/${id}`;
+    assert.equal((await call('/api/studies', { id, title: 'Unauthorized' })).status, 401);
+    assert.equal((await call(url)).status, 401);
+    assert.equal((await call(`${url}/evidence/${'a'.repeat(64)}`)).status, 401);
+    assert.equal((await call('/api/session', { credential: 'wrong' })).status, 401);
+    assert.equal((await call('/api/session', { credential: config.credential }, { Origin: 'https://evil.example' })).status, 403);
+    const login = await call('/api/session', { credential: config.credential });
+    assert.equal(login.status, 200);
+    const setCookie = login.headers.get('set-cookie')!;
+    for (const flag of ['HttpOnly', 'Secure', 'SameSite=Strict', 'Max-Age=43200']) assert(setCookie.includes(flag));
+    cookie = setCookie.split(';')[0];
+    assert.equal((await call('/api/session', undefined, { Cookie: `${cookie}forged` })).status, 401);
+    assert.equal((await call('/api/session', undefined, { Cookie: `allot_session=${sessionToken(config.sessionSecret, Date.now() - 1000)}` })).status, 401);
+    assert.equal((await call('/api/studies', { id, title: 'Invalid', owner_id: 'other' })).status, 400);
+    const creation = { id, title: '<script>Not executable</script>' };
+    assert.equal((await call('/api/studies', creation)).status, 200);
+    assert.equal((await call('/api/studies', creation)).status, 200);
+    const draft = await (await call(url)).json() as StudyView;
+    assert.equal(draft.lifecycle, 'draft');
+    assert.equal(draft.title, creation.title);
+    assert(!JSON.stringify(draft).includes('owner_id'));
+    const title = { commandId: randomUUID(), revision: 0, title: 'Renamed study' };
+    assert.equal((await call(`${url}/title`, title, { Origin: 'https://evil.example' })).status, 403);
+    assert.equal((await call(`${url}/title`, title)).status, 200);
+    assert.equal((await call(`${url}/title`, title)).status, 200);
+    assert.equal((await call(`${url}/title`, { ...title, commandId: randomUUID(), title: 'Competing tab' })).status, 409);
+    const start = { commandId: randomUUID(), revision: 1 };
+    const results = await Promise.all([call(`${url}/start`, start), call(`${url}/start`, start)]);
+    assert(results.every(r => r.status === 200));
+    const actor = actors.StudyActor.get(id, transport);
+    const running = await actor.work() as Study;
+    const view = await (await call(url)).json() as StudyView;
+    assert.equal(view.lifecycle, 'running');
+    for (const forbidden of ['request_id', 'attempt_id', 'commands', 'seen', config.credential, config.sessionSecret]) {
+      assert(!JSON.stringify(view).includes(forbidden));
+    }
+    assert.equal((await call(`${url}/title`, { ...title, commandId: randomUUID(), revision: view.revision })).status, 409);
+    const other = randomUUID();
+    await call('/api/studies', { id: other, title: 'Other study' });
+    const busy = await call(`/api/studies/${other}/start`, { commandId: randomUUID(), revision: 0 });
+    assert.equal(busy.status, 409);
+    assert.equal((await busy.json()).code, 'POOL_BUSY');
+    assert.equal((await (await call(`/api/studies/${other}`)).json()).lifecycle, 'draft');
+    const request = running.sites['site-a'].request;
+    await actor.accept({ ...request, message_id: `${request.request_id}:error`, type: 'job_error', payload: { code: 'SITE_ANALYSIS_FAILED' } }, null);
+    const blocked = await (await call(url)).json() as StudyView;
+    const retry = { commandId: randomUUID(), revision: blocked.revision };
+    assert.equal((await call(`${url}/sites/site-a/retry`, retry, { Cookie: '' })).status, 401);
+    assert.equal((await call(`${url}/sites/site-a/retry`, retry)).status, 200);
+    assert.equal((await call(`${url}/sites/site-a/retry`, retry)).status, 200);
+    const retried = await actor.work() as Study;
+    assert.notEqual(retried.sites['site-a'].request.attempt_id, request.attempt_id);
+    assert.equal(retried.lifecycle, 'running');
+    assert.equal((await call(`${url}/evidence/${'a'.repeat(64)}`)).status, 404);
+    assert.equal((await call(`${url}/finalize`, { commandId: randomUUID(), revision: retried.revision })).status, 404);
+    assert.equal((await call('/.local/browser/access.json')).status, 404);
+    await call('/api/session', undefined, {}, 'DELETE');
+    cookie = '';
+    assert.equal((await call(url)).status, 401);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await runtime.stop();
+    await rm(directory, { recursive: true, force: true });
   }
 });

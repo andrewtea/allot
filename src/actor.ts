@@ -19,6 +19,24 @@ export class StudyActor extends Actor<{ role: 'viewer' }, { type: 'snapshot' }, 
   /** Backend-only state, including durable jobs. No provider secrets are stored. */
   async work(): Promise<Unchecked<Study | null>> { return unchecked(this.state); }
 
+  async updateTitle(commandId: string, title: string, revision: number): Promise<Outcome> {
+    z.uuid().parse(commandId);
+    const parsed = studyInputSchema.shape.title.parse(title);
+    const state = this.state;
+    if (!state) return { ok: false, code: 'NOT_FOUND', revision: 0 };
+    const fingerprint = JSON.stringify(['title', parsed, revision]);
+    const replay = state.commands[commandId];
+    if (replay) return replay.fingerprint === fingerprint ? replay.outcome : { ok: false, code: 'COMMAND_CONFLICT', revision: state.revision };
+    if (state.revision !== revision || state.lifecycle !== 'draft') return { ok: false, code: 'CONFLICT', revision: state.revision };
+    const next = structuredClone(state);
+    next.input.title = parsed;
+    next.revision++;
+    const outcome = { ok: true, code: 'TITLE_UPDATED', revision: next.revision };
+    next.commands[commandId] = { fingerprint, outcome };
+    await this.#save(next);
+    return outcome;
+  }
+
   async start(commandId: string, revision: number): Promise<Outcome> {
     z.uuid().parse(commandId);
     const state = this.state;

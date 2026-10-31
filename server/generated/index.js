@@ -51,6 +51,7 @@ export const actors = {
                     { name: "markSent", result: "void" },
                     { name: "retrySite", result: "value" },
                     { name: "start", result: "value" },
+                    { name: "updateTitle", result: "value" },
                     { name: "work", result: "value" }
                 ],
                 transport

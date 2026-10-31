@@ -20,6 +20,7 @@ The valuable interaction is the follow-up: a site agent finds a problem, looks f
 
 ## 2. Decisions and boundaries
 
+- One always-running paid Render Web Service hosts the web UI, backend, and coordinator together. The free tier is unsuitable because idle spin-down can interrupt coordination. No separate Vercel deployment or worker service is required; Render hosting remains to be validated.
 - Managed Terse Durable Actors owns study state and live coordination. No self-hosting.
 - Freestyle runs three isolated site environments, their agents, and Python analysis tools.
 - Agent Relay carries coordinator/site requests and responses.
@@ -86,6 +87,7 @@ An agent can propose and explain; only researcher approval changes inclusion aft
 ### U4 — Handle interruptions and failures
 
 - Reloading or reopening the study restores its current state, findings, and decisions.
+- Closing the browser does not stop analysis or investigation. Restarting or redeploying the Render service briefly interrupts application access and coordination; after recovery, persisted work resumes without duplicate analyses or lost approvals. This is a recovery contract, not a zero-downtime guarantee.
 - If a site workspace is paused, starting or retrying work resumes it and waits for its agent to become ready. A resume failure is shown as a site error, never a successful analysis. A stopped workspace may take longer to recover because its processes must restart; deleted raw files are not promised recoverable.
 - A disconnected viewer sees a connection warning and the last known timestamp. Reconnection fetches current state; it must not imply a stale screen is live.
 - A site/tool/agent failure becomes **Error**, with a useful explanation and **Retry site** for the researcher. Completed sites remain intact.

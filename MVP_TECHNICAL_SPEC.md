@@ -21,11 +21,20 @@ User contract: [MVP_USER_SPEC.md](MVP_USER_SPEC.md). Workflow IDs U1–U6 are sh
 | Three Freestyle site VMs | One site agent each, local manifests/volumes, Python tools, job ledger | Each has only its site's dataset and scoped messaging identity |
 | Agent Relay | Coordinator/site requests, investigation exchanges, result delivery | Not the authoritative study ledger |
 
-Application server and coordinator worker may share one process for the demo; their responsibilities remain separate. Freestyle VMs are provisioned before the demo, not once per scan. One active analysis attempt per site is supported. Reject overlapping studies using a busy site with a visible start error rather than silently queueing unbounded work.
+Application server and coordinator worker share one process in one paid Render Web Service for the demo; their responsibilities remain separate. Freestyle VMs are provisioned before the demo, not once per scan. One active analysis attempt per site is supported. Reject overlapping studies using a busy site with a visible start error rather than silently queueing unbounded work.
 
 One small managed DemoRegistryActor persists created study IDs for worker recovery and an exclusive active-study reservation for the three-site demo pool. Start reserves by study/command ID before dispatch; retries resume that reservation. Finalization releases it idempotently, with worker reconciliation repairing a missed release. A start rejected as busy leaves the requesting study in Draft. This registry is not a user-facing study catalog or a second copy of study state.
 
 The central operator controls these demo VMs. This is an orchestrated system simulating federated access boundaries, not proof of organizational independence. Managed actors and Relay receive shared findings; external LLM providers receive only permitted text/measurements, not raw volumes or previews in v1.
+
+### Render application hosting
+
+- Deploy one always-running paid Render Web Service with one instance. The TypeScript HTTP server serves the built React app, study-URL fallbacks, and backend routes from one HTTPS origin; it binds to `0.0.0.0` on Render's assigned `PORT`. Vercel and a separate worker deployment are not required.
+- Start the coordinator with the HTTP server, maintain its Relay connection independently of browser requests, and reconcile persisted pending work on startup and reconnect. Run analysis records intent in Terse and returns promptly; closing a browser does not stop dispatch or result handling. Do not use Render's free web-service tier: it spins down after 15 minutes without inbound traffic and can interrupt coordination.
+- Browser live subscriptions connect to managed Terse using backend-authorized, scoped WebSocket grants. Render hosts the application, not the actor runtime or site analysis. Terse, Freestyle, Agent Relay, and OpenAI remain managed integrations.
+- Keep authoritative study state, job/outbox records, registry data, and accepted evidence in Terse, not Render memory or local disk. No Render persistent disk, separate application database, Redis, or object store is required for this bounded MVP.
+- A deployment restarts both the HTTP server and coordinator. Reconcile from Terse and the site ledgers after restart; preserve stable request IDs and deduplication even if old and new deployments briefly overlap. One configured replica is not an exactly-once execution guarantee.
+- Configure backend/provider credentials and stable session/viewer signing material as server-only Render environment variables, never frontend build variables. Preview environments must not inherit credentials that dispatch work against the shared demo sites.
 
 ### Freestyle workspace lifecycle
 
@@ -48,6 +57,7 @@ OpenAI calls from a site use Freestyle's documented outbound TLS credential inje
 4. Deploy a minimal managed Terse actor. Verify persisted state after reactivation, generated client calls, alarms, and browser WebSocket grants.
 5. Verify retrieval of a bounded approved montage through Freestyle `vm.fs.readFile`, including while paused. Map site-scoped artifact IDs to allowlisted evidence paths server-side; no raw-file browser or public evidence server. Prove final report evidence survives VM shutdown by persisting the snapshot before finalization.
 6. Verify snapshot-based workspace preparation, supervised runner restart, pause/resume recovery, and site model calls using edge-injected credentials. Verify the effective VM expiration policy covers the demo.
+7. Verify the single paid Render Web Service serves the UI and backend over HTTPS, including direct study URLs and secure-cookie access. Close the browser during a run and confirm work continues; restart/redeploy the service mid-run and verify pending jobs recover without duplicate analyses or lost decisions. Verify browser reconnection to managed Terse and finalized exports after restart. Render deployment remains unverified until this gate passes.
 
 If a gate fails, report the specific blocker and revise both specs rather than substituting fake results, silently removing image analysis, or changing vendors. Do not provision billable/shared resources without authorization. No runtime versions or dataset IDs are considered selected until these checks pass.
 
@@ -224,6 +234,7 @@ Deferred: Supabase, self-hosting, independent customer deployments, arbitrary st
 
 Vendor interfaces must be verified against pinned versions; these references establish intended capabilities, not proof of this integration:
 
+- [Render Web Services](https://render.com/docs/web-services) and [free-tier limitations](https://render.com/docs/free): paid persistent application hosting for the combined HTTP server and coordinator; free-service idle spin-down is unsuitable for coordination.
 - [Terse TypeScript reference](https://docs.useterse.ai/reference/typescript-sdk.md): persisted reassignment, actor serialization, alarms, generated clients, WebSocket grants.
 - [Terse quickstart](https://docs.useterse.ai/quickstart): managed deployment.
 - [Freestyle quickstart](https://www.freestyle.sh/docs/quickstart): VM creation, execution, explicit firewall configuration.
